@@ -1,42 +1,131 @@
+/* Global App Styles */
+
+* {
+  box-sizing: border-box;
+}
+
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #f9fafb;
+}
+
+/* Header */
+.app-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
   padding: 2rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.header-content {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.app-subtitle {
+  margin: 0.5rem 0 0 0;
+  font-size: 1rem;
+  opacity: 0.9;
+  font-weight: 400;
+}
+
+/* Main content */
+.app-main {
+  flex: 1;
+  padding: 2rem 0;
+  background-color: #f9fafb;
+}
+
+/* Footer */
+.app-footer {
+  background-color: #1f2937;
+  color: #9ca3af;
   text-align: center;
+  padding: 1.5rem;
+  font-size: 0.875rem;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+.app-footer p {
+  margin: 0;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
+/* 404 Page */
+.not-found {
+  max-width: 600px;
+  margin: 4rem auto;
+  padding: 3rem;
+  text-align: center;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.not-found h1 {
+  color: #1f2937;
+  margin-top: 0;
+  font-size: 2.5rem;
+}
+
+.not-found p {
+  color: #6b7280;
+  font-size: 1.125rem;
+  margin-bottom: 2rem;
+}
+
+.not-found .btn {
+  display: inline-block;
+  padding: 0.75rem 2rem;
+  background-color: #3b82f6;
+  color: white;
+  text-decoration: none;
+  border-radius: 6px;
+  font-weight: 500;
+  transition: background-color 0.15s;
+}
+
+.not-found .btn:hover {
+  background-color: #2563eb;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .app-header {
+    padding: 1.5rem 1rem;
   }
-  to {
-    transform: rotate(360deg);
+
+  .app-title {
+    font-size: 1.5rem;
   }
-}
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
+  .app-subtitle {
+    font-size: 0.875rem;
   }
-}
 
-.card {
-  padding: 2em;
-}
+  .app-main {
+    padding: 1rem 0;
+  }
 
-.read-the-docs {
-  color: #888;
+  .not-found {
+    margin: 2rem 1rem;
+    padding: 2rem 1rem;
+  }
+
+  .not-found h1 {
+    font-size: 1.75rem;
+  }
 }
