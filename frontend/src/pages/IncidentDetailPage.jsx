@@ -20,7 +20,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getIncident } from '../services/incidentsApi';
+import { getIncident, deleteIncident } from '../services/incidentsApi';
 import './IncidentDetailPage.css';
 
 function IncidentDetailPage() {
@@ -31,6 +31,7 @@ function IncidentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false); // For "copied!" feedback
+  const [deleting, setDeleting] = useState(false); // For delete operation
 
   // Load incident when component mounts or ID changes
   useEffect(() => {
@@ -81,6 +82,34 @@ function IncidentDetailPage() {
    */
   const getSeverityClass = (severity) => {
     return `severity-badge severity-${severity}`;
+  };
+
+  /**
+   * Handle incident deletion
+   */
+  const handleDelete = async () => {
+    // Confirm deletion
+    const confirmed = window.confirm(
+      `Are you sure you want to delete incident #${id}?\n\n"${incident.title}"\n\nThis action cannot be undone and will also delete all comments and activity.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setDeleting(true);
+      await deleteIncident(id);
+
+      // Show success message
+      alert('Incident deleted successfully');
+
+      // Navigate back to incidents list
+      navigate('/');
+
+    } catch (err) {
+      console.error('Failed to delete incident:', err);
+      alert(`Failed to delete incident: ${err.message}`);
+      setDeleting(false);
+    }
   };
 
   // Loading state
@@ -169,7 +198,7 @@ function IncidentDetailPage() {
 
       {/* AI Summary */}
       <section className="detail-section">
-        <h2>AI Summary</h2>
+        <h2>🤖 AI Analysis Summary</h2>
         <div className="ai-content summary">
           {incident.ai_summary || <em>No summary available</em>}
         </div>
@@ -177,7 +206,7 @@ function IncidentDetailPage() {
 
       {/* AI Root Causes */}
       <section className="detail-section">
-        <h2>Possible Root Causes</h2>
+        <h2>⚠️ Possible Root Causes</h2>
         {incident.ai_root_causes && incident.ai_root_causes.length > 0 ? (
           <ul className="root-causes-list">
             {incident.ai_root_causes.map((cause, index) => (
@@ -189,10 +218,27 @@ function IncidentDetailPage() {
         )}
       </section>
 
+      {/* Action Items */}
+      {incident.ai_action_items && incident.ai_action_items.length > 0 && (
+        <section className="detail-section">
+          <h2>🔧 Action Items & Resolution Steps</h2>
+          <div className="action-items-list">
+            {incident.ai_action_items.map((item, index) => (
+              <div key={index} className="action-item">
+                <div className="action-content">{item}</div>
+              </div>
+            ))}
+          </div>
+          <p className="help-text">
+            Follow these steps to investigate and resolve this incident.
+          </p>
+        </section>
+      )}
+
       {/* Customer Message */}
       <section className="detail-section">
         <div className="section-header">
-          <h2>Customer-Friendly Status Message</h2>
+          <h2>📢 Customer-Friendly Status Message</h2>
           <button
             onClick={copyCustomerMessage}
             className="btn btn-small"
@@ -207,6 +253,91 @@ function IncidentDetailPage() {
         <p className="help-text">
           This message is suitable for public status pages or customer communications.
         </p>
+      </section>
+
+      {/* AI Metadata Section */}
+      {incident.ai_metadata && Object.keys(incident.ai_metadata).length > 0 && (
+        <>
+          {/* Severity Justification */}
+          {incident.ai_metadata.severityJustification && (
+            <section className="detail-section">
+              <h2>⚖️ Severity Assessment</h2>
+              <div className="ai-content severity-justification">
+                {incident.ai_metadata.severityJustification}
+              </div>
+            </section>
+          )}
+
+          {/* Similar Patterns */}
+          {incident.ai_metadata.similarPatterns && incident.ai_metadata.similarPatterns.length > 0 && (
+            <section className="detail-section">
+              <h2>🔍 Similar Incident Patterns</h2>
+              <ul className="patterns-list">
+                {incident.ai_metadata.similarPatterns.map((pattern, index) => (
+                  <li key={index}>{pattern}</li>
+                ))}
+              </ul>
+              <p className="help-text">
+                This incident matches known patterns that may help with diagnosis.
+              </p>
+            </section>
+          )}
+
+          {/* Preventive Measures */}
+          {incident.ai_metadata.preventiveMeasures && incident.ai_metadata.preventiveMeasures.length > 0 && (
+            <section className="detail-section">
+              <h2>🛡️ Preventive Recommendations</h2>
+              <ul className="preventive-list">
+                {incident.ai_metadata.preventiveMeasures.map((measure, index) => (
+                  <li key={index}>{measure}</li>
+                ))}
+              </ul>
+              <p className="help-text">
+                Implement these measures to prevent similar incidents in the future.
+              </p>
+            </section>
+          )}
+
+          {/* Analysis Metadata */}
+          <section className="detail-section metadata-section">
+            <h2>📊 Analysis Information</h2>
+            <div className="metadata-grid">
+              {incident.ai_metadata.analysisTimestamp && (
+                <div className="metadata-item">
+                  <span className="metadata-label">Analyzed:</span>
+                  <span className="metadata-value">{formatDate(incident.ai_metadata.analysisTimestamp)}</span>
+                </div>
+              )}
+              {incident.ai_metadata.tokensUsed && (
+                <div className="metadata-item">
+                  <span className="metadata-label">Tokens Used:</span>
+                  <span className="metadata-value">{incident.ai_metadata.tokensUsed.toLocaleString()}</span>
+                </div>
+              )}
+              {incident.ai_metadata.fallbackMode && (
+                <div className="metadata-item fallback-warning">
+                  <span className="metadata-label">⚠️ Note:</span>
+                  <span className="metadata-value">Generated using fallback mode (AI unavailable)</span>
+                </div>
+              )}
+            </div>
+          </section>
+        </>
+      )}
+
+      {/* Delete Button */}
+      <section className="detail-section danger-zone">
+        <h2>Danger Zone</h2>
+        <p className="danger-zone-description">
+          Deleting this incident will permanently remove all associated data, including comments and activity history. This action cannot be undone.
+        </p>
+        <button
+          onClick={handleDelete}
+          className="btn btn-danger"
+          disabled={deleting}
+        >
+          {deleting ? 'Deleting...' : 'Delete Incident'}
+        </button>
       </section>
     </div>
   );

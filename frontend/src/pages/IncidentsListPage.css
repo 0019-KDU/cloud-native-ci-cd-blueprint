@@ -1,9 +1,11 @@
 /* Incidents List Page Styles */
 
 .incidents-page {
-  max-width: 1200px;
-  margin: 0 auto;
+  max-width: 100%;
+  width: 100%;
+  margin: 0;
   padding: 2rem;
+  box-sizing: border-box;
 }
 
 .page-header {
@@ -76,6 +78,8 @@
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .incidents-table {
@@ -89,14 +93,25 @@
 }
 
 .incidents-table th {
-  padding: 1rem;
-  text-align: left;
-  font-weight: 600;
+  background-color: #f9fafb;
   color: #374151;
+  font-weight: 600;
+  text-align: left;
+  padding: 0.875rem 1rem;
+  border-bottom: 2px solid #e5e7eb;
   font-size: 0.875rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  white-space: nowrap;
 }
+
+.incidents-table th:nth-child(1) { width: 60px; }      /* ID */
+.incidents-table th:nth-child(2) { width: 20%; }       /* Title */
+.incidents-table th:nth-child(3) { width: 100px; }     /* Severity */
+.incidents-table th:nth-child(4) { width: 100px; }     /* Status */
+.incidents-table th:nth-child(5) { width: auto; }      /* AI Analysis */
+.incidents-table th:nth-child(6) { width: 150px; }     /* Created */
+.incidents-table th:nth-child(7) { width: 150px; }     /* Actions */
 
 .incidents-table tbody tr {
   border-bottom: 1px solid #e5e7eb;
@@ -137,6 +152,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  white-space: nowrap;
 }
 
 .severity-low {
@@ -152,6 +168,112 @@
 .severity-high {
   background-color: #fee2e2;
   color: #991b1b;
+}
+
+.severity-critical {
+  background-color: #fecaca;
+  color: #7f1d1d;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+/* Status Badge */
+.status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.status-open {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.status-investigating {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.status-resolved {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.status-closed {
+  background-color: #e5e7eb;
+  color: #4b5563;
+}
+
+/* AI Analysis Cell */
+.ai-analysis-cell {
+  max-width: 400px;
+}
+
+.ai-summary-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.summary-text {
+  font-size: 0.85rem;
+  color: #4b5563;
+  line-height: 1.5;
+}
+
+.ai-indicators {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ai-badge.enhanced {
+  background-color: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+}
+
+.ai-badge.fallback {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.ai-badge.actions {
+  background-color: #f0f9ff;
+  color: #0284c7;
+  border: 1px solid #bae6fd;
+}
+
+/* Table Cell Adjustments */
+.id-cell {
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.date-cell {
+  font-size: 0.85rem;
+  color: #6b7280;
+  white-space: nowrap;
 }
 
 /* Buttons */
@@ -185,6 +307,29 @@
 
 .btn-small:hover {
   background-color: #e5e7eb;
+}
+
+.btn-delete {
+  background-color: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.btn-delete:hover:not(:disabled) {
+  background-color: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.btn-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Actions cell */
+.actions-cell {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 /* Responsive */

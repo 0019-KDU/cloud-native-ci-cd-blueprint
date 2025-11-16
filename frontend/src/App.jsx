@@ -14,10 +14,11 @@
  * - Can share/bookmark URLs
  */
 
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import IncidentsListPage from './pages/IncidentsListPage';
 import IncidentDetailPage from './pages/IncidentDetailPage';
 import NewIncidentPage from './pages/NewIncidentPage';
+import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import './App.css';
 
 function App() {
@@ -30,6 +31,11 @@ function App() {
             <h1 className="app-title">AI Incident Assistant</h1>
             <p className="app-subtitle">DevOps Incident Management with AI-Powered Analysis</p>
           </div>
+          <nav className="app-nav">
+            <Link to="/" className="nav-link">Incidents</Link>
+            <Link to="/analytics" className="nav-link">Analytics</Link>
+            <Link to="/incidents/new" className="nav-link nav-link-primary">+ New Incident</Link>
+          </nav>
         </header>
 
         {/* Main content */}
@@ -37,6 +43,9 @@ function App() {
           <Routes>
             {/* Home page - List all incidents */}
             <Route path="/" element={<IncidentsListPage />} />
+
+            {/* Analytics Dashboard */}
+            <Route path="/analytics" element={<AnalyticsDashboard />} />
 
             {/* Create new incident - MUST come before /:id */}
             <Route path="/incidents/new" element={<NewIncidentPage />} />

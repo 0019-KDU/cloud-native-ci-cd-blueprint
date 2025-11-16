@@ -64,7 +64,7 @@ async function createIncident(incidentData) {
       rootCausesCount: aiAnalysis.rootCauses.length,
     });
 
-    // Step 2: Save to database
+    // Step 2: Save to database with enhanced AI metadata
     // We use parameterized query ($1, $2, etc.) to prevent SQL injection
     const query = `
       INSERT INTO incidents (
@@ -73,9 +73,12 @@ async function createIncident(incidentData) {
         description,
         ai_summary,
         ai_root_causes,
-        ai_customer_message
+        ai_customer_message,
+        ai_action_items,
+        ai_metadata,
+        status
       )
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `;
 
@@ -86,15 +89,16 @@ async function createIncident(incidentData) {
       aiAnalysis.summary,
       JSON.stringify(aiAnalysis.rootCauses), // Convert array to JSON for JSONB column
       aiAnalysis.customerMessage,
+      JSON.stringify(aiAnalysis.actionItems || []),
+      JSON.stringify(aiAnalysis.metadata || {}), // Store enhanced metadata
+      'open', // Initial status
     ];
 
     const result = await db.query(query, values);
     const incident = result.rows[0];
 
-    // Parse ai_root_causes back to array for the response
-    if (incident.ai_root_causes) {
-      incident.ai_root_causes = JSON.parse(incident.ai_root_causes);
-    }
+    // PostgreSQL JSONB column already returns the data as an object/array
+    // No need to parse it - it's already in the correct format
 
     logger.success('Incident created successfully', {
       id: incident.id,
@@ -135,12 +139,18 @@ async function getAllIncidents(options = {}) {
         id,
         title,
         severity,
+        status,
+        assigned_to,
         description,
         ai_summary,
         ai_root_causes,
         ai_customer_message,
+        ai_action_items,
+        ai_metadata,
         created_at,
-        updated_at
+        updated_at,
+        resolved_at,
+        closed_at
       FROM incidents
       ORDER BY created_at DESC
       LIMIT $1 OFFSET $2
@@ -185,12 +195,18 @@ async function getIncidentById(id) {
         id,
         title,
         severity,
+        status,
+        assigned_to,
         description,
         ai_summary,
         ai_root_causes,
         ai_customer_message,
+        ai_action_items,
+        ai_metadata,
         created_at,
-        updated_at
+        updated_at,
+        resolved_at,
+        closed_at
       FROM incidents
       WHERE id = $1
     `;
@@ -204,10 +220,8 @@ async function getIncidentById(id) {
 
     const incident = result.rows[0];
 
-    // Parse JSONB field
-    if (incident.ai_root_causes) {
-      incident.ai_root_causes = incident.ai_root_causes || [];
-    }
+    // PostgreSQL JSONB column already returns the data as an object/array
+    // No parsing needed
 
     logger.debug('Incident retrieved successfully', { id, title: incident.title });
 
@@ -266,10 +280,47 @@ async function getIncidentsBySeverity(severity) {
   }
 }
 
+/**
+ * Delete an incident by ID
+ * This will cascade delete all related comments and activity (due to ON DELETE CASCADE)
+ *
+ * @param {number} id - Incident ID
+ * @returns {Promise<boolean>} - True if deleted successfully
+ */
+async function deleteIncident(id) {
+  logger.info('Deleting incident', { id });
+
+  try {
+    const query = `
+      DELETE FROM incidents
+      WHERE id = $1
+      RETURNING id
+    `;
+
+    const result = await db.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      throw new Error(`Incident with ID ${id} not found`);
+    }
+
+    logger.success('Incident deleted successfully', { id });
+
+    return true;
+
+  } catch (error) {
+    logger.error('Failed to delete incident', {
+      error: error.message,
+      id,
+    });
+    throw error;
+  }
+}
+
 // Export all service functions
 module.exports = {
   createIncident,
   getAllIncidents,
   getIncidentById,
   getIncidentsBySeverity,
+  deleteIncident,
 };

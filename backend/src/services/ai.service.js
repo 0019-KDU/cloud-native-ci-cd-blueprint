@@ -49,68 +49,182 @@ async function generateIncidentAnalysis(incidentData) {
   });
 
   try {
-    // Construct the prompt for OpenAI
-    // This tells the AI exactly what we want and in what format
-    const prompt = `You are a DevOps incident analysis assistant. Analyze the following incident and provide:
-1. A concise summary (1-2 sentences)
-2. 2-3 possible root causes
-3. A customer-friendly status message suitable for a public status page
+    // Construct an advanced prompt with detailed context and expert-level analysis
+    const systemPrompt = `You are a Senior Site Reliability Engineer (SRE) and DevOps expert with 15+ years of experience in:
+- Distributed systems architecture
+- Cloud infrastructure (AWS, Azure, GCP)
+- Kubernetes and container orchestration
+- Database performance tuning
+- Network troubleshooting
+- Application performance monitoring
+- Incident response and post-mortem analysis
 
-Incident Details:
-- Title: ${title}
-- Severity: ${severity}
-- Description: ${description}
+Your analysis should demonstrate deep technical expertise while being clear and actionable.`;
 
-Respond in JSON format with this structure:
+    const userPrompt = `Analyze this production incident with expert-level precision:
+
+INCIDENT DETAILS:
+Title: ${title}
+Declared Severity: ${severity}
+Full Description & Error Logs:
+${description}
+
+REQUIRED ANALYSIS:
+
+1. TECHNICAL SUMMARY (2-3 sentences)
+   - Identify the core technical issue
+   - Explain the immediate impact on system functionality
+   - Use precise technical terminology
+
+2. ROOT CAUSE ANALYSIS (3-5 detailed causes, ranked by likelihood)
+   - For each cause, explain WHY it could happen
+   - Include specific system components or services involved
+   - Reference error patterns, codes, or stack traces from the description
+   - Distinguish between symptoms and actual root causes
+
+3. CUSTOMER STATUS MESSAGE (professional, empathetic, clear)
+   - Acknowledge the issue without technical jargon
+   - Provide realistic expectations
+   - Show we're actively working on it
+   - Avoid phrases like "we apologize for the inconvenience"
+
+4. ACTIONABLE RESOLUTION STEPS (5-7 technical steps)
+   - Prioritize immediate mitigation over long-term fixes
+   - Include specific commands, API calls, or procedures
+   - Mention which team or role should handle each step
+   - Include verification steps to confirm resolution
+   - Consider rollback or failover options
+
+5. SEVERITY ASSESSMENT (low, medium, high, critical)
+   - Evaluate actual severity based on:
+     * User impact scope (% affected)
+     * Business criticality
+     * Data integrity risk
+     * System availability
+   - May differ from declared severity
+
+6. SIMILAR INCIDENT PATTERNS (1-2 related scenarios)
+   - Reference common DevOps issues this resembles
+   - Mention if this could indicate a larger systemic issue
+
+7. PREVENTIVE MEASURES (2-3 recommendations)
+   - Suggest monitoring, alerting, or architectural improvements
+   - Recommend testing or validation procedures
+
+RESPONSE FORMAT (JSON):
 {
-  "summary": "Brief technical summary here",
-  "rootCauses": ["Cause 1", "Cause 2", "Cause 3"],
-  "customerMessage": "Customer-friendly message here"
+  "summary": "Technical summary here",
+  "rootCauses": [
+    {
+      "cause": "Primary root cause description",
+      "likelihood": "high|medium|low",
+      "reasoning": "Why this is likely based on evidence",
+      "components": ["service-name", "database", "network"]
+    }
+  ],
+  "customerMessage": "Customer-facing message",
+  "actionItems": [
+    {
+      "priority": "immediate|high|medium",
+      "action": "Specific step to take",
+      "owner": "SRE|DevOps|Engineering|DBA",
+      "command": "Optional: specific command or procedure"
+    }
+  ],
+  "suggestedSeverity": "critical|high|medium|low",
+  "severityJustification": "Why this severity level",
+  "similarPatterns": ["Pattern 1", "Pattern 2"],
+  "preventiveMeasures": ["Measure 1", "Measure 2", "Measure 3"]
 }
 
-Keep the customer message professional, reassuring, and non-technical. Avoid mentioning internal tools or specifics.`;
+ANALYSIS GUIDELINES:
+- Parse error codes, timestamps, and stack traces carefully
+- Look for patterns: timeouts, resource exhaustion, cascading failures
+- Consider both infrastructure and application layers
+- Think about recent changes: deployments, config updates, traffic spikes
+- Be specific about monitoring metrics to check (CPU, memory, disk I/O, network)`;
 
-    // Call OpenAI API
+    // Call OpenAI API with enhanced parameters for better reasoning
     const response = await openai.chat.completions.create({
       model: config.openai.model,
       messages: [
         {
           role: 'system',
-          content: 'You are an expert DevOps engineer analyzing production incidents. Provide clear, actionable analysis.',
+          content: systemPrompt,
         },
         {
           role: 'user',
-          content: prompt,
+          content: userPrompt,
         },
       ],
-      temperature: config.openai.temperature,
-      max_tokens: config.openai.maxTokens,
+      temperature: 0.3, // Lower temperature for more focused, deterministic analysis
+      max_tokens: 2500, // Increased for detailed analysis
       response_format: { type: 'json_object' }, // Ensures response is valid JSON
+      presence_penalty: 0.1, // Encourage diverse vocabulary
+      frequency_penalty: 0.1, // Reduce repetition
     });
 
-    // Extract the AI's response
+    // Extract and parse the AI's response
     const aiContent = response.choices[0].message.content;
     const analysis = JSON.parse(aiContent);
 
     logger.success('AI analysis generated successfully', {
       tokensUsed: response.usage.total_tokens,
+      model: response.model,
       summary: analysis.summary.substring(0, 50) + '...',
+      rootCausesCount: analysis.rootCauses?.length || 0,
     });
 
-    // Validate that we got all required fields
+    // Validate required fields
     if (!analysis.summary || !analysis.rootCauses || !analysis.customerMessage) {
       throw new Error('AI response missing required fields');
     }
 
-    // Ensure rootCauses is an array
-    if (!Array.isArray(analysis.rootCauses)) {
-      analysis.rootCauses = [analysis.rootCauses];
-    }
+    // Transform the enhanced analysis into the format our database expects
+    // Convert detailed root causes to formatted strings
+    const formattedRootCauses = Array.isArray(analysis.rootCauses)
+      ? analysis.rootCauses.map(rc => {
+          if (typeof rc === 'object' && rc.cause) {
+            // Enhanced format with likelihood and reasoning
+            const likelihood = rc.likelihood ? `[${rc.likelihood.toUpperCase()}]` : '';
+            const components = rc.components && rc.components.length > 0 
+              ? ` (Components: ${rc.components.join(', ')})` 
+              : '';
+            return `${likelihood} ${rc.cause}${components}\nReasoning: ${rc.reasoning || 'Analysis based on error patterns'}`;
+          }
+          return rc; // Fallback to simple string format
+        })
+      : [analysis.rootCauses];
+
+    // Format action items with priority and ownership
+    const formattedActionItems = Array.isArray(analysis.actionItems)
+      ? analysis.actionItems.map((item, index) => {
+          if (typeof item === 'object' && item.action) {
+            const priority = item.priority ? `[${item.priority.toUpperCase()}]` : '[MEDIUM]';
+            const owner = item.owner ? ` @${item.owner}` : '';
+            const command = item.command ? `\n   Command: ${item.command}` : '';
+            return `${index + 1}. ${priority}${owner} ${item.action}${command}`;
+          }
+          return typeof item === 'string' ? `${index + 1}. ${item}` : item;
+        })
+      : analysis.actionItems || [];
+
+    // Build comprehensive metadata
+    const metadata = {
+      severityJustification: analysis.severityJustification || 'Based on incident description',
+      similarPatterns: analysis.similarPatterns || [],
+      preventiveMeasures: analysis.preventiveMeasures || [],
+      analysisTimestamp: new Date().toISOString(),
+      tokensUsed: response.usage.total_tokens,
+    };
 
     return {
       summary: analysis.summary,
-      rootCauses: analysis.rootCauses,
+      rootCauses: formattedRootCauses,
       customerMessage: analysis.customerMessage,
+      actionItems: formattedActionItems,
+      suggestedSeverity: analysis.suggestedSeverity || severity,
+      metadata: metadata, // Additional context for advanced features
     };
 
   } catch (error) {
@@ -124,12 +238,30 @@ Keep the customer message professional, reassuring, and non-technical. Avoid men
     logger.warn('Using fallback AI responses due to error');
 
     return {
-      summary: `${severity.toUpperCase()} severity incident: ${title}`,
+      summary: `${severity.toUpperCase()} severity incident: ${title} (AI analysis unavailable)`,
       rootCauses: [
-        'Unable to generate AI analysis at this time',
-        'Please review incident details manually',
+        '[HIGH] AI analysis service temporarily unavailable - manual review required',
+        '[MEDIUM] Check system logs and monitoring dashboards for immediate patterns',
+        '[MEDIUM] Review recent changes (deployments, configs, infrastructure) from the last 24 hours',
       ],
-      customerMessage: 'We are currently investigating an issue and will provide updates shortly.',
+      customerMessage: 'We are currently investigating an issue affecting our services. Our engineering team has been notified and is actively working on a resolution. We will provide updates as more information becomes available.',
+      actionItems: [
+        '1. [IMMEDIATE] @SRE Review error logs, metrics, and traces in monitoring system',
+        '2. [IMMEDIATE] @SRE Check system resources: CPU, memory, disk I/O, network connectivity',
+        '3. [HIGH] @DevOps Verify recent deployments and consider rollback if applicable',
+        '4. [HIGH] @Engineering Review application logs for exceptions and error patterns',
+        '5. [MEDIUM] @Engineering Check database performance and connection pools',
+        '6. [MEDIUM] @SRE Verify external dependencies and third-party service status',
+      ],
+      suggestedSeverity: severity,
+      metadata: {
+        severityJustification: 'Using declared severity - AI analysis unavailable',
+        similarPatterns: [],
+        preventiveMeasures: ['Implement AI service redundancy', 'Set up fallback analysis pipeline'],
+        analysisTimestamp: new Date().toISOString(),
+        tokensUsed: 0,
+        fallbackMode: true,
+      },
     };
   }
 }

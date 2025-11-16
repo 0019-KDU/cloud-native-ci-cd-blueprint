@@ -13,10 +13,10 @@
  * 7. Starts the HTTP server
  *
  * Flow when server starts:
- * - Load config ’ Test DB connection ’ Start Express ’ Listen on port
+ * - Load config ï¿½ Test DB connection ï¿½ Start Express ï¿½ Listen on port
  *
  * Flow when request comes in:
- * - CORS middleware ’ JSON parser ’ Route handler ’ Error handler ’ Response
+ * - CORS middleware ï¿½ JSON parser ï¿½ Route handler ï¿½ Error handler ï¿½ Response
  */
 
 const express = require('express');
@@ -24,8 +24,10 @@ const cors = require('cors');
 const config = require('./config/env');
 const logger = require('./config/logger');
 const db = require('./db');
-const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
+const { errorHandler, notFoundHandler} = require('./middlewares/errorHandler');
 const incidentsRoutes = require('./routes/incidents.routes');
+const managementRoutes = require('./routes/incidents-management.routes');
+const managementController = require('./controllers/incidents-management.controller');
 
 // Create Express application
 const app = express();
@@ -85,6 +87,15 @@ app.get('/api', (req, res) => {
 // All routes defined in incidentsRoutes will be prefixed with /api/incidents
 app.use('/api/incidents', incidentsRoutes);
 
+// Mount management routes (these also use /api/incidents prefix for updates)
+app.use('/api/incidents', managementRoutes);
+
+// Search endpoint
+app.get('/api/incidents/search', managementController.searchIncidents);
+
+// Analytics endpoints
+app.get('/api/analytics/overview', managementController.getAnalytics);
+
 /**
  * ERROR HANDLING
  * These MUST come after all routes
@@ -102,7 +113,7 @@ app.use(errorHandler);
  */
 async function startServer() {
   try {
-    logger.info('=€ Starting AI Incident Assistant API...');
+    logger.info('=ï¿½ Starting AI Incident Assistant API...');
 
     // Test database connection
     logger.info('Testing database connection...');

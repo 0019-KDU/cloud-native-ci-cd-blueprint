@@ -184,10 +184,41 @@ async function getBySeverity(req, res, next) {
   }
 }
 
+/**
+ * Delete an incident
+ * Route: DELETE /api/incidents/:id
+ * URL param: id (incident ID)
+ * Response: 200 OK on success, 404 if not found
+ *
+ * Example: DELETE /api/incidents/5
+ */
+async function deleteIncident(req, res, next) {
+  try {
+    const { id } = req.params;
+
+    logger.info('DELETE /api/incidents/:id', { id });
+
+    await incidentsService.deleteIncident(id);
+
+    res.status(200).json({
+      success: true,
+      message: `Incident ${id} deleted successfully`,
+    });
+
+  } catch (error) {
+    logger.error('Error in delete incidents controller', {
+      error: error.message,
+      id: req.params.id,
+    });
+    next(error);
+  }
+}
+
 // Export all controller functions
 module.exports = {
   create,
   getAll,
   getById,
   getBySeverity,
+  deleteIncident,
 };

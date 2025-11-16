@@ -9,10 +9,11 @@
  * come from actual environment variables.
  */
 
-// Load environment variables from .env.development file
+// Load environment variables from .env file
 // This only works if you install the 'dotenv' package
 // Run: npm install dotenv
-require('dotenv').config({ path: '.env.development' });
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
 const config = {
   // Server configuration

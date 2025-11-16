@@ -81,3 +81,17 @@ export async function getIncidentsBySeverity(severity) {
   const response = await api.get(`/api/incidents/severity/${severity}`);
   return response.data;
 }
+
+/**
+ * Delete an incident
+ *
+ * @param {number} id - Incident ID
+ * @returns {Promise<Object>} - Success response
+ *
+ * Example usage:
+ *   await deleteIncident(5);
+ */
+export async function deleteIncident(id) {
+  const response = await api.delete(`/api/incidents/${id}`);
+  return response;
+}

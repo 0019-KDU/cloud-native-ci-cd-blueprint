@@ -75,4 +75,18 @@ router.get('/severity/:severity', incidentsController.getBySeverity);
  */
 router.get('/:id', incidentsController.getById);
 
+/**
+ * DELETE /api/incidents/:id
+ * Delete an incident by ID
+ *
+ * URL parameter:
+ * - id: incident ID (number)
+ *
+ * Example: DELETE /api/incidents/42
+ *
+ * Response: 200 OK on success, 404 if not found
+ * Note: This will cascade delete all related comments and activity
+ */
+router.delete('/:id', incidentsController.deleteIncident);
+
 module.exports = router;

@@ -21,7 +21,7 @@
 
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { getIncidents } from '../services/incidentsApi';
+import { getIncidents, deleteIncident } from '../services/incidentsApi';
 import './IncidentsListPage.css';
 
 function IncidentsListPage() {
@@ -29,6 +29,7 @@ function IncidentsListPage() {
   const [incidents, setIncidents] = useState([]); // Array of incident objects
   const [loading, setLoading] = useState(true);   // Loading indicator
   const [error, setError] = useState(null);        // Error message
+  const [deletingId, setDeletingId] = useState(null); // Track which incident is being deleted
 
   // Load incidents when component mounts
   useEffect(() => {
@@ -64,6 +65,34 @@ function IncidentsListPage() {
    */
   const formatDate = (timestamp) => {
     return new Date(timestamp).toLocaleString();
+  };
+
+  /**
+   * Handle incident deletion from list
+   */
+  const handleDelete = async (id, title) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete incident #${id}?\n\n"${title}"\n\nThis action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setDeletingId(id);
+      await deleteIncident(id);
+
+      // Remove from local state
+      setIncidents(prev => prev.filter(inc => inc.id !== id));
+
+      // Show success message
+      alert('Incident deleted successfully');
+
+    } catch (err) {
+      console.error('Failed to delete incident:', err);
+      alert(`Failed to delete incident: ${err.message}`);
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   // Loading state
@@ -120,41 +149,86 @@ function IncidentsListPage() {
                 <th>ID</th>
                 <th>Title</th>
                 <th>Severity</th>
-                <th>Summary</th>
+                <th>Status</th>
+                <th>AI Analysis</th>
                 <th>Created</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {incidents.map((incident) => (
-                <tr key={incident.id}>
-                  <td>{incident.id}</td>
-                  <td>
-                    <Link to={`/incidents/${incident.id}`} className="incident-title">
-                      {incident.title}
-                    </Link>
-                  </td>
-                  <td>
-                    <span className={getSeverityClass(incident.severity)}>
-                      {incident.severity}
-                    </span>
-                  </td>
-                  <td className="summary-cell">
-                    {incident.ai_summary ? (
-                      incident.ai_summary.substring(0, 100) +
-                      (incident.ai_summary.length > 100 ? '...' : '')
-                    ) : (
-                      <em>No summary</em>
-                    )}
-                  </td>
-                  <td>{formatDate(incident.created_at)}</td>
-                  <td>
-                    <Link to={`/incidents/${incident.id}`} className="btn btn-small">
-                      View Details
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {incidents.map((incident) => {
+                const hasEnhancedAI = incident.ai_metadata && 
+                  (incident.ai_metadata.similarPatterns?.length > 0 || 
+                   incident.ai_metadata.preventiveMeasures?.length > 0);
+                const isFallback = incident.ai_metadata?.fallbackMode;
+                const hasActionItems = incident.ai_action_items && incident.ai_action_items.length > 0;
+
+                return (
+                  <tr key={incident.id}>
+                    <td className="id-cell">{incident.id}</td>
+                    <td>
+                      <Link to={`/incidents/${incident.id}`} className="incident-title">
+                        {incident.title}
+                      </Link>
+                    </td>
+                    <td>
+                      <span className={getSeverityClass(incident.severity)}>
+                        {incident.severity}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`status-badge status-${incident.status || 'open'}`}>
+                        {incident.status || 'open'}
+                      </span>
+                    </td>
+                    <td className="ai-analysis-cell">
+                      {incident.ai_summary ? (
+                        <div className="ai-summary-preview">
+                          <div className="summary-text">
+                            {incident.ai_summary.substring(0, 120) +
+                            (incident.ai_summary.length > 120 ? '...' : '')}
+                          </div>
+                          <div className="ai-indicators">
+                            {hasEnhancedAI && !isFallback && (
+                              <span className="ai-badge enhanced" title="Enhanced AI Analysis with patterns & recommendations">
+                                🤖 Enhanced
+                              </span>
+                            )}
+                            {isFallback && (
+                              <span className="ai-badge fallback" title="Generated using fallback mode">
+                                ⚠️ Fallback
+                              </span>
+                            )}
+                            {hasActionItems && (
+                              <span className="ai-badge actions" title={`${incident.ai_action_items.length} action items`}>
+                                🔧 {incident.ai_action_items.length} actions
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <em>No analysis</em>
+                      )}
+                    </td>
+                    <td className="date-cell">{formatDate(incident.created_at)}</td>
+                    <td>
+                      <div className="actions-cell">
+                        <Link to={`/incidents/${incident.id}`} className="btn btn-small">
+                          View
+                        </Link>
+                        <button
+                          onClick={() => handleDelete(incident.id, incident.title)}
+                          className="btn btn-small btn-delete"
+                          disabled={deletingId === incident.id}
+                          title="Delete incident"
+                        >
+                          {deletingId === incident.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
