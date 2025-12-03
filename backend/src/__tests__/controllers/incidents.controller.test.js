@@ -7,6 +7,7 @@ const request = require('supertest');
 const express = require('express');
 const incidentsController = require('../../controllers/incidents.controller');
 const incidentsService = require('../../services/incidents.service');
+const { errorHandler } = require('../../middlewares/errorHandler');
 
 // Mock service
 jest.mock('../../services/incidents.service');
@@ -18,6 +19,7 @@ app.post('/api/incidents', incidentsController.create);
 app.get('/api/incidents', incidentsController.getAll);
 app.get('/api/incidents/:id', incidentsController.getById);
 app.delete('/api/incidents/:id', incidentsController.deleteIncident);
+app.use(errorHandler);
 
 describe('Incidents Controller', () => {
   beforeEach(() => {

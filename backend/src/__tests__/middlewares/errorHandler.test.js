@@ -48,9 +48,9 @@ describe('Error Handler Middleware', () => {
         success: false,
         error: expect.objectContaining({
           message: 'Test error',
-          statusCode: 500
-        }),
-        stack: expect.any(String)
+          statusCode: 500,
+          stack: expect.any(String)
+        })
       })
     );
 
