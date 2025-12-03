@@ -27,7 +27,11 @@ describe('Error Handler Middleware', () => {
 
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({
-      error: 'Something went wrong'
+      success: false,
+      error: {
+        message: 'Something went wrong',
+        statusCode: 500
+      }
     });
   });
 
@@ -41,6 +45,11 @@ describe('Error Handler Middleware', () => {
 
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
+        success: false,
+        error: expect.objectContaining({
+          message: 'Test error',
+          statusCode: 500
+        }),
         stack: expect.any(String)
       })
     );
@@ -58,6 +67,8 @@ describe('Error Handler Middleware', () => {
 
     const callArgs = res.json.mock.calls[0][0];
     expect(callArgs).not.toHaveProperty('stack');
+    expect(callArgs).toHaveProperty('success', false);
+    expect(callArgs).toHaveProperty('error');
 
     process.env.NODE_ENV = originalEnv;
   });
@@ -68,7 +79,12 @@ describe('Error Handler Middleware', () => {
     errorHandler(error, req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(500);
-    expect(res.json).toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        error: expect.any(Object)
+      })
+    );
   });
 
   it('should use custom status code if available', () => {
@@ -78,5 +94,13 @@ describe('Error Handler Middleware', () => {
     errorHandler(error, req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        error: expect.objectContaining({
+          statusCode: 404
+        })
+      })
+    );
   });
 });
