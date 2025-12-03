@@ -2,7 +2,7 @@
  * Error Handler Middleware Unit Tests
  */
 
-const errorHandler = require('../../middlewares/errorHandler');
+const { errorHandler } = require('../../middlewares/errorHandler');
 
 describe('Error Handler Middleware', () => {
   let req, res, next;

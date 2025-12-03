@@ -47,8 +47,9 @@ describe('Incidents Controller', () => {
         .send(validIncident);
 
       expect(response.status).toBe(201);
-      expect(response.body).toHaveProperty('id');
-      expect(response.body.title).toBe(validIncident.title);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toHaveProperty('id');
+      expect(response.body.data.title).toBe(validIncident.title);
     });
 
     it('should return 400 for missing fields', async () => {
@@ -102,8 +103,9 @@ describe('Incidents Controller', () => {
         .get('/api/incidents');
 
       expect(response.status).toBe(200);
-      expect(response.body).toHaveLength(2);
-      expect(response.body[0].id).toBe(1);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toHaveLength(2);
+      expect(response.body.data[0].id).toBe(1);
     });
 
     it('should support pagination query parameters', async () => {
@@ -125,7 +127,8 @@ describe('Incidents Controller', () => {
         .get('/api/incidents');
 
       expect(response.status).toBe(200);
-      expect(response.body).toEqual([]);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toEqual([]);
     });
 
     it('should return 500 for server errors', async () => {
@@ -154,8 +157,9 @@ describe('Incidents Controller', () => {
         .get('/api/incidents/1');
 
       expect(response.status).toBe(200);
-      expect(response.body.id).toBe(1);
-      expect(response.body.title).toBe('Test Incident');
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.id).toBe(1);
+      expect(response.body.data.title).toBe('Test Incident');
     });
 
     it('should return 404 when incident not found', async () => {
@@ -165,7 +169,8 @@ describe('Incidents Controller', () => {
         .get('/api/incidents/999');
 
       expect(response.status).toBe(404);
-      expect(response.body.error).toContain('not found');
+      expect(response.body.success).toBe(false);
+      expect(response.body.error.message).toContain('not found');
     });
 
     it('should return 500 for server errors', async () => {
