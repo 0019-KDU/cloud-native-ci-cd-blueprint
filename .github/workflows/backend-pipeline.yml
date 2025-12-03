@@ -175,13 +175,18 @@ jobs:
 
       - name: Save Docker image
         run: |
-          docker save ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }} -o backend-image.tar
+          IMAGE_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          docker save ${IMAGE_TAG} -o backend-image.tar
+          echo "Saved image: ${IMAGE_TAG}"
+          echo "${IMAGE_TAG}" > image-tag.txt
 
       - name: Upload Docker image artifact
         uses: actions/upload-artifact@v4
         with:
           name: backend-image
-          path: backend-image.tar
+          path: |
+            backend-image.tar
+            image-tag.txt
           retention-days: 1
 
   # Job 5: Security Scan with Trivy
@@ -198,12 +203,15 @@ jobs:
           name: backend-image
 
       - name: Load Docker image
-        run: docker load -i backend-image.tar
+        run: |
+          docker load -i backend-image.tar
+          IMAGE_TAG=$(cat image-tag.txt)
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          image-ref: ${{ env.IMAGE_TAG }}
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH"
@@ -217,7 +225,7 @@ jobs:
       - name: Run Trivy vulnerability scanner (table format)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          image-ref: ${{ env.IMAGE_TAG }}
           format: "table"
           exit-code: "0"
           severity: "CRITICAL,HIGH"
@@ -239,7 +247,10 @@ jobs:
           name: backend-image
 
       - name: Load Docker image
-        run: docker load -i backend-image.tar
+        run: |
+          docker load -i backend-image.tar
+          LOADED_TAG=$(cat image-tag.txt)
+          echo "LOADED_TAG=${LOADED_TAG}" >> $GITHUB_ENV
 
       - name: Login to DigitalOcean Container Registry
         uses: docker/login-action@v3
@@ -260,9 +271,12 @@ jobs:
 
       - name: Tag and push images
         run: |
-          for tag in ${{ steps.meta.outputs.tags }}; do
-            docker tag ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }} $tag
-            docker push $tag
+          echo "${{ steps.meta.outputs.tags }}" | while read -r tag; do
+            if [ -n "$tag" ]; then
+              echo "Tagging and pushing: $tag"
+              docker tag ${LOADED_TAG} $tag
+              docker push $tag
+            fi
           done
 
       - name: Output image details
