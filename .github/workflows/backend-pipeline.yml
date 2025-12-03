@@ -126,18 +126,15 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         with:
           projectBaseDir: backend
-          args: >
-            -Dsonar.projectKey=ai-incident-backend
-            -Dsonar.sources=src
-            -Dsonar.tests=src/__tests__
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
-            -Dsonar.coverage.exclusions=**/__tests__/**,**/node_modules/**
 
       - name: SonarQube Quality Gate
         uses: SonarSource/sonarqube-quality-gate-action@master
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          scanMetadataReportFile: backend/.scannerwork/report-task.txt
 
   # Job 4: Build Docker Image
   build:
