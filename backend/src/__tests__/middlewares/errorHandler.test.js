@@ -38,10 +38,14 @@ describe('Error Handler Middleware', () => {
   it('should include stack trace in development mode', () => {
     const originalEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'development';
+    
+    // Reload config to pick up new NODE_ENV
+    jest.resetModules();
+    const { errorHandler: devErrorHandler } = require('../../middlewares/errorHandler');
 
     const error = new Error('Test error');
 
-    errorHandler(error, req, res, next);
+    devErrorHandler(error, req, res, next);
 
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -53,24 +57,30 @@ describe('Error Handler Middleware', () => {
         })
       })
     );
-
+    
     process.env.NODE_ENV = originalEnv;
   });
 
   it('should not include stack trace in production mode', () => {
     const originalEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
+    
+    // Reload config to pick up new NODE_ENV
+    jest.resetModules();
+    const { errorHandler: prodErrorHandler } = require('../../middlewares/errorHandler');
 
     const error = new Error('Test error');
 
-    errorHandler(error, req, res, next);
+    prodErrorHandler(error, req, res, next);
 
     const callArgs = res.json.mock.calls[0][0];
     expect(callArgs).not.toHaveProperty('stack');
+    expect(callArgs.error).not.toHaveProperty('stack');
     expect(callArgs).toHaveProperty('success', false);
     expect(callArgs).toHaveProperty('error');
 
     process.env.NODE_ENV = originalEnv;
+    jest.resetModules();
   });
 
   it('should handle errors without message', () => {
