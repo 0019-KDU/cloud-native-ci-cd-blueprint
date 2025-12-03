@@ -12,16 +12,14 @@ paths = [
   '''\.md$''',
   '''\.txt$''',
   '''package-lock\.json$''',
+  '''\.github/SECRETS_SETUP\.md$''',
 ]
 
 regexes = [
   '''example\.com''',
   '''localhost''',
   '''127\.0\.0\.1''',
+  '''test_password''',
+  '''dop_v1_xxxx''',
+  '''sqp_xxxx''',
 ]
-
-[allowlist.commits]
-# Add commit SHAs to ignore (for historical commits with false positives)
-
-[[allowlist.regexTarget]]
-regex = '''(test|example|sample)'''
