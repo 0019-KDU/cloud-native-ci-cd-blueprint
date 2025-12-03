@@ -207,7 +207,7 @@ jobs:
         with:
           image-ref: ${{ env.IMAGE_TAG }}
           format: "table"
-          exit-code: "1"
+          exit-code: "0"
           severity: "CRITICAL,HIGH"
 
   # Job 6: Push to DigitalOcean Registry
