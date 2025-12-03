@@ -16,7 +16,7 @@ COPY backend/package*.json ./
 # Install production dependencies only
 # --omit=dev excludes devDependencies
 # --legacy-peer-deps handles peer dependency issues
-RUN npm ci --omit=dev --legacy-peer-deps && \
+RUN npm install --omit=dev --legacy-peer-deps && \
     npm cache clean --force
 
 # Stage 2: Build (if needed for transpilation)
