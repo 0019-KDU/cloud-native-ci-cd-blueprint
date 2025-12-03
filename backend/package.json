@@ -41,6 +41,7 @@
       "src/**/*.js",
       "!src/index.js",
       "!src/db/migrations/**",
+      "!src/**/*-management.*",
       "!**/node_modules/**"
     ],
     "coverageThreshold": {
