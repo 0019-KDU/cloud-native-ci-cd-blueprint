@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dev
+
+bases:
+  - ../../base
+
+resources:
+  - namespace.yaml
+  - postgres-secret.yaml
+  - backend-secrets.yaml
+
+commonLabels:
+  environment: dev
+
+images:
+  - name: registry.digitalocean.com/ai-incident-assistant/backend
+    newTag: dev-latest
+  - name: registry.digitalocean.com/ai-incident-assistant/frontend
+    newTag: dev-latest
+
+replicas:
+  - name: backend
+    count: 1
+  - name: frontend
+    count: 1
+
+

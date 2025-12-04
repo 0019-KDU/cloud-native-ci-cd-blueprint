@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: staging
+
+bases:
+  - ../../base
+
+resources:
+  - postgres-secret.yaml
+  - backend-secrets.yaml
+
+commonLabels:
+  environment: staging
+
+images:
+  - name: registry.digitalocean.com/ai-incident-assistant/backend
+    newTag: staging-latest
+  - name: registry.digitalocean.com/ai-incident-assistant/frontend
+    newTag: staging-latest
+
+replicas:
+  - name: backend
+    count: 2
+  - name: frontend
+    count: 2
+
+

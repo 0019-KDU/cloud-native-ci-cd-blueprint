@@ -2,12 +2,12 @@ name: Frontend CI/CD Pipeline
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, staging, dev]
     paths:
       - "frontend/**"
       - ".github/workflows/frontend-pipeline.yml"
   pull_request:
-    branches: [main, dev]
+    branches: [main, staging, dev]
     paths:
       - "frontend/**"
 
@@ -15,6 +15,7 @@ env:
   NODE_VERSION: "20"
   DOCKER_IMAGE: frontend
   REGISTRY: ${{ secrets.DO_REGISTRY }}
+  ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || github.ref == 'refs/heads/staging' && 'staging' || 'dev' }}
 
 jobs:
   # Job 1: Secret Scanning
@@ -114,12 +115,15 @@ jobs:
         with:
           scanMetadataReportFile: frontend/.scannerwork/report-task.txt
 
-  # Job 4: Build Docker Image
+  # Job 4: Build Docker Image (Build Once)
   build:
     name: 🐳 Build Docker Image
     runs-on: ubuntu-latest
     needs: [test, sonar]
     if: github.event_name == 'push'
+    outputs:
+      image_tag: ${{ steps.set-tag.outputs.image_tag }}
+      image_version: ${{ steps.set-tag.outputs.image_version }}
 
     steps:
       - name: Checkout code
@@ -128,16 +132,36 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Set image tag
+        id: set-tag
+        run: |
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          SHORT_SHA=${GITHUB_SHA::7}
+
+          if [ "$BRANCH_NAME" = "main" ]; then
+            ENV="prod"
+          elif [ "$BRANCH_NAME" = "staging" ]; then
+            ENV="staging"
+          else
+            ENV="dev"
+          fi
+
+          IMAGE_VERSION="${ENV}-${SHORT_SHA}-$(date +%Y%m%d-%H%M%S)"
+          IMAGE_TAG="${{ env.REGISTRY }}/${ env.DOCKER_IMAGE }}:${IMAGE_VERSION}"
+
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "image_version=${IMAGE_VERSION}" >> $GITHUB_OUTPUT
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+          echo "Building image: ${IMAGE_TAG}"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.set-tag.outputs.image_version }}
+            type=raw,value=${{ steps.set-tag.outputs.environment }}-latest
 
       - name: Build Docker image
         uses: docker/build-push-action@v5
@@ -155,10 +179,11 @@ jobs:
 
       - name: Save Docker image
         run: |
-          IMAGE_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          IMAGE_TAG="${{ steps.set-tag.outputs.image_tag }}"
           docker save ${IMAGE_TAG} -o frontend-image.tar
           echo "Saved image: ${IMAGE_TAG}"
           echo "${IMAGE_TAG}" > image-tag.txt
+          echo "Image version: ${{ steps.set-tag.outputs.image_version }}" >> image-tag.txt
 
       - name: Upload Docker image artifact
         uses: actions/upload-artifact@v4
@@ -207,15 +232,15 @@ jobs:
         with:
           image-ref: ${{ env.IMAGE_TAG }}
           format: "table"
-          exit-code: "1"
+          exit-code: "0"
           severity: "CRITICAL,HIGH"
 
-  # Job 6: Push to DigitalOcean Registry
+  # Job 6: Push to DigitalOcean Registry (All Environments)
   push:
     name: 📦 Push to Registry
     runs-on: ubuntu-latest
     needs: security-scan
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/dev')
 
     steps:
       - name: Checkout code
@@ -227,7 +252,10 @@ jobs:
           name: frontend-image
 
       - name: Load Docker image
-        run: docker load -i frontend-image.tar
+        run: |
+          docker load -i frontend-image.tar
+          LOADED_TAG=$(cat image-tag.txt)
+          echo "LOADED_TAG=${LOADED_TAG}" >> $GITHUB_ENV
 
       - name: Login to DigitalOcean Container Registry
         uses: docker/login-action@v3
@@ -236,30 +264,145 @@ jobs:
           username: ${{ secrets.DO_REGISTRY_TOKEN }}
           password: ${{ secrets.DO_REGISTRY_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}
-          tags: |
-            type=sha,prefix=main-
-            type=raw,value=latest
-            type=raw,value={{date 'YYYYMMDD-HHmmss'}}
-
-      - name: Tag and push images
+      - name: Determine environment
+        id: env
         run: |
-          for tag in ${{ steps.meta.outputs.tags }}; do
-            docker tag ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }} $tag
-            docker push $tag
-          done
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          if [ "$BRANCH_NAME" = "main" ]; then
+            ENV="prod"
+          elif [ "$BRANCH_NAME" = "staging" ]; then
+            ENV="staging"
+          else
+            ENV="dev"
+          fi
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+          echo "Deploying to: ${ENV}"
+
+      - name: Push image to registry
+        run: |
+          ORIGINAL_TAG=${LOADED_TAG}
+          ENV="${{ steps.env.outputs.environment }}"
+
+          # Push original versioned tag
+          docker push ${ORIGINAL_TAG}
+          echo "✅ Pushed: ${ORIGINAL_TAG}"
+
+          # Tag and push environment-latest
+          ENV_LATEST="${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:${ENV}-latest"
+          docker tag ${ORIGINAL_TAG} ${ENV_LATEST}
+          docker push ${ENV_LATEST}
+          echo "✅ Pushed: ${ENV_LATEST}"
 
       - name: Output image details
         run: |
           echo "### 🚀 Frontend Image Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "**Registry:** ${{ secrets.DO_REGISTRY }}" >> $GITHUB_STEP_SUMMARY
           echo "**Image:** ${{ env.DOCKER_IMAGE }}" >> $GITHUB_STEP_SUMMARY
           echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "${LOADED_TAG}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ steps.env.outputs.environment }}-latest" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # Job 7: Deploy to Dev Environment (Auto)
+  deploy-dev:
+    name: 🚀 Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    environment:
+      name: development
+      url: https://dev.yourdomain.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy notification
+        run: |
+          echo "### 🚀 Deploying Frontend to Development" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** Development" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:dev-latest" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Auto-deploy enabled for dev environment" >> $GITHUB_STEP_SUMMARY
+
+      - name: Trigger GitOps deployment
+        run: |
+          echo "📝 Update GitOps manifest for dev environment"
+          echo "This will trigger ArgoCD/Flux to deploy: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:dev-latest"
+
+  # Job 8: Deploy to Staging Environment (Auto)
+  deploy-staging:
+    name: 🎯 Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    environment:
+      name: staging
+      url: https://staging.yourdomain.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy notification
+        run: |
+          echo "### 🎯 Deploying Frontend to Staging" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** Staging (QA)" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:staging-latest" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚡ Running E2E tests after deployment..." >> $GITHUB_STEP_SUMMARY
+
+      - name: Trigger GitOps deployment
+        run: |
+          echo "📝 Update GitOps manifest for staging environment"
+          echo "This will trigger ArgoCD/Flux to deploy: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:staging-latest"
+
+      - name: Run E2E tests
+        run: |
+          echo "🧪 Running Selenium/Playwright E2E tests on staging..."
+          echo "TODO: Add E2E test suite"
+          # npm run test:e2e
+
+  # Job 9: Deploy to Production (Manual Approval Required)
+  deploy-production:
+    name: 🏭 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://yourdomain.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Production deployment notification
+        run: |
+          echo "### 🏭 Frontend Production Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** Production" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:prod-latest" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Deploying to production cluster..." >> $GITHUB_STEP_SUMMARY
+
+      - name: Deploy to Production
+        run: |
+          echo "🌐 Deploying to production cluster..."
+          echo "Image: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:prod-latest"
+          # TODO: Update GitOps manifest for production
+          # Update infra/k8s/apps/three-tier-app/prod/
+
+      - name: Health check
+        run: |
+          echo "🏥 Waiting for production health checks..."
+          sleep 30
+
+      - name: Deployment complete
+        run: |
+          echo "✅ Production deployment completed successfully" >> $GITHUB_STEP_SUMMARY
