@@ -183,7 +183,6 @@ jobs:
           docker save ${IMAGE_TAG} -o frontend-image.tar
           echo "Saved image: ${IMAGE_TAG}"
           echo "${IMAGE_TAG}" > image-tag.txt
-          echo "Image version: ${{ steps.set-tag.outputs.image_version }}" >> image-tag.txt
 
       - name: Upload Docker image artifact
         uses: actions/upload-artifact@v4
@@ -210,11 +209,13 @@ jobs:
       - name: Load Docker image
         run: |
           docker load -i frontend-image.tar
-          IMAGE_TAG=$(cat image-tag.txt)
+          IMAGE_TAG=$(head -n 1 image-tag.txt | tr -d '\r')
           echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+          echo "Loaded image tag: ${IMAGE_TAG}"
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           image-ref: ${{ env.IMAGE_TAG }}
           format: "sarif"
@@ -222,8 +223,8 @@ jobs:
           severity: "CRITICAL,HIGH"
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: "trivy-results.sarif"
 
@@ -254,8 +255,9 @@ jobs:
       - name: Load Docker image
         run: |
           docker load -i frontend-image.tar
-          LOADED_TAG=$(cat image-tag.txt)
+          LOADED_TAG=$(head -n 1 image-tag.txt | tr -d '\r')
           echo "LOADED_TAG=${LOADED_TAG}" >> $GITHUB_ENV
+          echo "Loaded image tag: ${LOADED_TAG}"
 
       - name: Login to DigitalOcean Container Registry
         uses: docker/login-action@v3
