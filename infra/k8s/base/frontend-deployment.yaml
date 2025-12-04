@@ -17,7 +17,7 @@ spec:
         component: web
     spec:
       imagePullSecrets:
-      - name: do-registry-secret
+      - name: ai-incident-assistant
       containers:
       - name: frontend
         image: registry.digitalocean.com/ai-incident-assistant/frontend:dev-latest # Will be overridden by Kustomize
