@@ -2,7 +2,8 @@ name: Frontend CI/CD Pipeline
 
 on:
   push:
-    branches: [main, staging, dev]
+    branches:
+      - "**" # Trigger on all branches
     paths:
       - "frontend/**"
       - ".github/workflows/frontend-pipeline.yml"
