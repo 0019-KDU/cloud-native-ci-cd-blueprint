@@ -2,7 +2,8 @@ name: Frontend CI/CD Pipeline
 
 on:
   push:
-    branches: [main, staging, dev]
+    branches:
+      - "**" # Trigger on all branches
     paths:
       - "frontend/**"
       - ".github/workflows/frontend-pipeline.yml"
@@ -147,7 +148,7 @@ jobs:
           fi
 
           IMAGE_VERSION="${ENV}-${SHORT_SHA}-$(date +%Y%m%d-%H%M%S)"
-          IMAGE_TAG="${{ env.REGISTRY }}/${ env.DOCKER_IMAGE }}:${IMAGE_VERSION}"
+          IMAGE_TAG="${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:${IMAGE_VERSION}"
 
           echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
           echo "image_version=${IMAGE_VERSION}" >> $GITHUB_OUTPUT
