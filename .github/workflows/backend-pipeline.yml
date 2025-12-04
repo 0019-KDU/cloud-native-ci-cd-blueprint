@@ -371,7 +371,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
     environment:
       name: staging
-      url: http://<loadbalancer-ip>/api
+      url: http://129.212.208.28/api
 
     steps:
       - name: Checkout code
@@ -384,21 +384,113 @@ jobs:
           echo "**Environment:** Staging (QA)" >> $GITHUB_STEP_SUMMARY
           echo "**Image:** ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:staging-latest" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "⚡ Running integration tests after deployment..." >> $GITHUB_STEP_SUMMARY
+          echo "⚡ Deployment will trigger ArgoCD sync..." >> $GITHUB_STEP_SUMMARY
 
       - name: Trigger GitOps deployment
         run: |
-          echo "📝 Update GitOps manifest for staging environment"
-          echo "This will trigger ArgoCD/Flux to deploy: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:staging-latest"
+          echo "📝 ArgoCD will auto-sync staging environment"
+          echo "Image: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:staging-latest"
+          echo "Ingress URL: http://129.212.208.28"
 
-      - name: Run integration tests
+  # Job 9: E2E Tests on Staging
+  e2e-test:
+    name: 🧪 E2E Tests
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: tests/e2e/package-lock.json
+
+      - name: Install Playwright dependencies
+        working-directory: tests/e2e
         run: |
-          echo "🧪 Running integration tests on staging..."
-          echo "TODO: Add Selenium, API tests, chaos engineering tests"
-          # npm run test:integration
-          # npm run test:e2e
+          npm ci
+          npx playwright install --with-deps chromium
 
-  # Job 9: Deploy to Production (Manual Approval Required)
+      - name: Wait for staging deployment
+        run: |
+          echo "⏳ Waiting 60 seconds for staging pods to be ready..."
+          sleep 60
+
+      - name: Run E2E tests
+        working-directory: tests/e2e
+        env:
+          BASE_URL: http://129.212.208.28
+        run: npm run test
+        continue-on-error: true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: tests/e2e/playwright-report/
+          retention-days: 30
+
+      - name: E2E test summary
+        if: always()
+        run: |
+          echo "### 🧪 E2E Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Test reports uploaded as artifacts" >> $GITHUB_STEP_SUMMARY
+
+  # Job 10: Load Testing with K6
+  load-test:
+    name: 📊 Load Testing
+    runs-on: ubuntu-latest
+    needs: e2e-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install K6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Run smoke test
+        run: |
+          echo "🔥 Running K6 smoke test..."
+          k6 run -e BASE_URL=http://129.212.208.28 tests/load/smoke-test.js
+
+      - name: Run load test
+        run: |
+          echo "📊 Running K6 load test..."
+          k6 run -e BASE_URL=http://129.212.208.28 --out json=load-test-results.json tests/load/load-test.js
+        continue-on-error: true
+
+      - name: Upload load test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: load-test-results.json
+          retention-days: 30
+
+      - name: Load test summary
+        if: always()
+        run: |
+          echo "### 📊 Load Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Load test completed. Results uploaded as artifacts." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test URL:** http://129.212.208.28" >> $GITHUB_STEP_SUMMARY
+
+  # Job 11: Deploy to Production (Manual Approval Required)
   deploy-production:
     name: 🏭 Deploy to Production
     runs-on: ubuntu-latest
