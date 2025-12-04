@@ -16,6 +16,8 @@ spec:
         app: backend
         component: api
     spec:
+      imagePullSecrets:
+      - name: do-registry-secret
       containers:
       - name: backend
         image: registry.digitalocean.com/ai-incident-assistant/backend:dev-latest # Will be overridden by Kustomize
