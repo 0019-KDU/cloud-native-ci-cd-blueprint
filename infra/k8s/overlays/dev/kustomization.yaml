@@ -6,8 +6,9 @@ namespace: dev
 resources:
   - ../../base
   - namespace.yaml
-  - postgres-secret.yaml
-  - backend-secrets.yaml
+  # Secrets are managed manually in cluster with kubectl
+  # - postgres-secret.yaml
+  # - backend-secrets.yaml
 
 labels:
   - pairs:
