@@ -6,8 +6,10 @@ infra/terraform/kubeconfig-*.yaml
 
 # Environment files with secrets
 backend/.env
-**/backend-secrets.yaml
-**/postgres-secret.yaml
+# Block staging and production secrets (contain real credentials)
+infra/k8s/overlays/staging/*-secret.yaml
+infra/k8s/overlays/production/*-secret.yaml
+# Dev secrets are safe to commit (placeholder values only)
 
 # Node
 node_modules/

@@ -3,15 +3,14 @@ kind: Kustomization
 
 namespace: production
 
-bases:
-  - ../../base
-
 resources:
+  - ../../base
   - postgres-secret.yaml
   - backend-secrets.yaml
 
-commonLabels:
-  environment: production
+labels:
+  - pairs:
+      environment: production
 
 images:
   - name: registry.digitalocean.com/ai-incident-assistant/backend
