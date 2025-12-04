@@ -3,15 +3,14 @@ kind: Kustomization
 
 namespace: staging
 
-bases:
-  - ../../base
-
 resources:
+  - ../../base
   - postgres-secret.yaml
   - backend-secrets.yaml
 
-commonLabels:
-  environment: staging
+labels:
+  - pairs:
+      environment: staging
 
 images:
   - name: registry.digitalocean.com/ai-incident-assistant/backend
