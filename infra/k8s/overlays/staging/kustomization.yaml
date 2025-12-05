@@ -35,8 +35,10 @@ configMapGenerator:
 
 replicas:
   - name: backend
-    count: 2
+    count: 1
   - name: frontend
-    count: 2
+    count: 1
+  - name: postgres
+    count: 1
 
 
