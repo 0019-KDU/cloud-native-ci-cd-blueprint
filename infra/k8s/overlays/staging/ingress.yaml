@@ -11,20 +11,20 @@ metadata:
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
     nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization"
 spec:
-  ingressClassName: nginx
+  ingressClassName: nginx-staging
   rules:
   - http:
       paths:
-      # Backend API routes - use /staging/api prefix
-      - path: /staging/api(/|$)(.*)
+      # Backend API routes
+      - path: /api(/|$)(.*)
         pathType: ImplementationSpecific
         backend:
           service:
             name: backend
             port:
               number: 3001
-      # Frontend routes - use /staging prefix
-      - path: /staging(/|$)(.*)
+      # Frontend routes (must be last)
+      - path: /()(.*)
         pathType: ImplementationSpecific
         backend:
           service:
