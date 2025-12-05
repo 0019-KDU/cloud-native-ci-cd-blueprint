@@ -6,7 +6,7 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
-  ingressClassName: nginx-staging
+  ingressClassName: nginx
   rules:
   - http:
       paths:
