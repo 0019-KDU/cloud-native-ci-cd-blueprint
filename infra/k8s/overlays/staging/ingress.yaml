@@ -13,19 +13,18 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-  - host: staging.local
-    http:
+  - http:
       paths:
-      # Backend API routes
-      - path: /api(/|$)(.*)
+      # Backend API routes - use /staging/api prefix
+      - path: /staging/api(/|$)(.*)
         pathType: ImplementationSpecific
         backend:
           service:
             name: backend
             port:
               number: 3001
-      # Frontend routes (must be last)
-      - path: /()(.*)
+      # Frontend routes - use /staging prefix
+      - path: /staging(/|$)(.*)
         pathType: ImplementationSpecific
         backend:
           service:
