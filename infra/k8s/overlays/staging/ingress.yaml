@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: ai-incident-assistant-ingress
+  name: staging-ingress
   namespace: staging
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /$2
@@ -13,7 +13,8 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-  - http:
+  - host: staging.local
+    http:
       paths:
       # Backend API routes
       - path: /api(/|$)(.*)
