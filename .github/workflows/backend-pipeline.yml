@@ -463,12 +463,12 @@ jobs:
       - name: Run smoke test
         run: |
           echo "🔥 Running K6 smoke test..."
-          k6 run -e BASE_URL=http://129.212.208.28 tests/load/smoke-test.js
+          k6 run -e BASE_URL=http://209.38.57.239 tests/load/smoke-test.js
 
       - name: Run load test
         run: |
           echo "📊 Running K6 load test..."
-          k6 run -e BASE_URL=http://129.212.208.28 --out json=load-test-results.json tests/load/load-test.js
+          k6 run -e BASE_URL=http://209.38.57.239 --out json=load-test-results.json tests/load/load-test.js
         continue-on-error: true
 
       - name: Upload load test results
