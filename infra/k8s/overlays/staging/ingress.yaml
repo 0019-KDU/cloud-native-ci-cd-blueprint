@@ -4,28 +4,23 @@ metadata:
   name: staging-ingress
   namespace: staging
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
-    nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
-    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
-    nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization"
 spec:
   ingressClassName: nginx-staging
   rules:
   - http:
       paths:
       # Backend API routes
-      - path: /api(/|$)(.*)
-        pathType: ImplementationSpecific
+      - path: /api
+        pathType: Prefix
         backend:
           service:
             name: backend
             port:
               number: 3001
-      # Frontend routes (must be last)
-      - path: /()(.*)
-        pathType: ImplementationSpecific
+      # Frontend routes (must be last to avoid catching /api)
+      - path: /
+        pathType: Prefix
         backend:
           service:
             name: frontend
