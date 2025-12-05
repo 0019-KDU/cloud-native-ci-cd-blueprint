@@ -6,7 +6,7 @@ namespace: staging
 resources:
   - namespace.yaml
   - ../../base
-  - ingress.yaml
+  - frontend-service-lb.yaml
   # Secrets managed manually in cluster:
   # - postgres-secret.yaml
   # - backend-secrets.yaml
