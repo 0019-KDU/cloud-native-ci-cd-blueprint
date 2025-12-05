@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-incident-assistant-dev
+  namespace: argocd
+spec:
+  project: default
+  
+  source:
+    repoURL: https://github.com/0019-KDU/cloud-native-ci-cd-blueprint
+    targetRevision: dev
+    path: infra/k8s/overlays/dev
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

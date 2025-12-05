@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dev
+
+resources:
+  - ../../base
+  - namespace.yaml
+  # Secrets are managed manually in cluster with kubectl
+  # - postgres-secret.yaml
+  # - backend-secrets.yaml
+
+labels:
+  - pairs:
+      environment: dev
+
+images:
+  - name: registry.digitalocean.com/ai-incident-assistant/backend
+    newTag: dev-latest
+  - name: registry.digitalocean.com/ai-incident-assistant/frontend
+    newTag: dev-latest
+
+replicas:
+  - name: backend
+    count: 1
+  - name: frontend
+    count: 1
+
+
