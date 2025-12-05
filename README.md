@@ -2,6 +2,10 @@
 
 A **production-grade cloud-native application** for DevOps teams to manage incidents with AI-powered analysis, featuring a complete **GitOps CI/CD pipeline** with multi-stage deployments.
 
+## 📦 Related Repositories
+
+- **Infrastructure**: [cloud-native-infrastructure](https://github.com/0019-KDU/cloud-native-infrastructure) - Terraform configs and ArgoCD applications for Kubernetes cluster provisioning
+
 ## 🎯 Overview
 
 This application helps DevOps engineers and startups manage incidents by automatically generating:
@@ -59,7 +63,6 @@ cloud-native-ci-cd-blueprint/
 │   │   ├── routes/              # API route definitions
 │   │   ├── middlewares/         # Express middlewares
 │   │   └── index.js             # App entry point
-│   ├── .env.development         # Backend environment variables (create from .env.example)
 │   ├── package.json
 │   └── README.md
 │
@@ -69,15 +72,34 @@ cloud-native-ci-cd-blueprint/
 │   │   ├── services/            # API client
 │   │   ├── App.jsx              # Main app with routing
 │   │   └── main.jsx             # Entry point
-│   ├── .env.development         # Frontend environment variables (create from .env.example)
 │   ├── package.json
 │   └── README.md
+│
+├── infra/
+│   ├── k8s/                     # Kubernetes manifests
+│   │   ├── base/                # Base deployments, services
+│   │   └── overlays/            # Environment-specific configs
+│   │       ├── dev/
+│   │       └── staging/
+│   └── docker/                  # Dockerfiles for backend/frontend
+│
+├── .github/workflows/           # CI/CD pipelines
+│   ├── backend-pipeline.yml     # Backend build, test, deploy
+│   └── frontend-pipeline.yml    # Frontend build, test, deploy
+│
+├── tests/
+│   ├── e2e/                     # Playwright E2E tests
+│   └── load/                    # K6 load tests
 │
 ├── docs/
 │   ├── SETUP_GUIDE.md           # Complete setup instructions
 │   └── ci-cd-design.md          # CI/CD design documentation
 │
 └── README.md                     # This file
+
+**Infrastructure (separate repo):** [cloud-native-infrastructure](https://github.com/0019-KDU/cloud-native-infrastructure)
+├── terraform/                    # Kubernetes cluster provisioning
+└── argocd/                      # ArgoCD application definitions
 ```
 
 ## Quick Start
