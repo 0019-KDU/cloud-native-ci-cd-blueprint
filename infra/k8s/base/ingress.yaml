@@ -40,18 +40,9 @@ spec:
   ingressClassName: nginx
   
   rules:
-  # Frontend routes (root path)
   - http:
       paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: frontend
-            port:
-              number: 80
-      
-      # Backend API routes
+      # Backend API routes (must come BEFORE root path for proper matching)
       - path: /api
         pathType: Prefix
         backend:
@@ -59,6 +50,15 @@ spec:
             name: backend
             port:
               number: 3001
+      
+      # Frontend routes (root path - catches everything else)
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 80
   
   # TLS Configuration (optional - commented for initial setup)
   # Uncomment and configure after obtaining certificates
