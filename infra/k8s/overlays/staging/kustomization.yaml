@@ -16,12 +16,14 @@ commonLabels:
 
 # Replica counts for staging (moderate HA)
 replicas:
-- name: backend
-  count: 2
-- name: frontend
-  count: 2
+- count: 2
+  name: backend
+- count: 2
+  name: frontend
 
 # Resource patches for staging environment (moderate limits)
+
+
 patches:
 - patch: |-
     - op: replace
@@ -39,7 +41,6 @@ patches:
   target:
     kind: Deployment
     name: backend
-
 - patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/resources/requests/cpu
@@ -56,7 +57,6 @@ patches:
   target:
     kind: Deployment
     name: frontend
-
 - patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/resources/requests/cpu
@@ -76,18 +76,18 @@ patches:
 
 # ConfigMap for staging-specific configuration
 configMapGenerator:
-- name: backend-config
-  behavior: merge
+- behavior: merge
   literals:
   - NODE_ENV=staging
   - LOG_LEVEL=info
   - CORS_ORIGIN=*
+  name: backend-config
 
 # Image tags (will be updated by CI/CD pipeline)
 images:
 - name: registry.digitalocean.com/ai-incident-assistant/backend
-  newTag: latest
+  newName: registry.digitalocean.com/ai-incident-assistant/backend
+  newTag: 159ac95a7aded70a95e81ff6a93c77d2b578c143
 - name: registry.digitalocean.com/ai-incident-assistant/frontend
-  newTag: latest
-
-
+  newName: registry.digitalocean.com/ai-incident-assistant/frontend
+  newTag: 159ac95a7aded70a95e81ff6a93c77d2b578c143

@@ -16,12 +16,14 @@ commonLabels:
 
 # Replica counts for dev (lower for cost optimization)
 replicas:
-- name: backend
-  count: 1
-- name: frontend
-  count: 1
+- count: 1
+  name: backend
+- count: 1
+  name: frontend
 
 # Resource patches for dev environment (lower limits)
+
+
 patches:
 - patch: |-
     - op: replace
@@ -39,7 +41,6 @@ patches:
   target:
     kind: Deployment
     name: backend
-
 - patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/resources/requests/cpu
@@ -56,7 +57,6 @@ patches:
   target:
     kind: Deployment
     name: frontend
-
 - patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/resources/requests/cpu
@@ -76,16 +76,18 @@ patches:
 
 # ConfigMap for dev-specific configuration
 configMapGenerator:
-- name: backend-config
-  behavior: merge
+- behavior: merge
   literals:
   - NODE_ENV=development
   - LOG_LEVEL=debug
   - CORS_ORIGIN=*
+  name: backend-config
 
 # Image tags (will be updated by CI/CD pipeline)
 images:
 - name: registry.digitalocean.com/ai-incident-assistant/backend
-  newTag: latest
+  newName: registry.digitalocean.com/ai-incident-assistant/backend
+  newTag: 159ac95a7aded70a95e81ff6a93c77d2b578c143
 - name: registry.digitalocean.com/ai-incident-assistant/frontend
-  newTag: latest
+  newName: registry.digitalocean.com/ai-incident-assistant/frontend
+  newTag: 159ac95a7aded70a95e81ff6a93c77d2b578c143
