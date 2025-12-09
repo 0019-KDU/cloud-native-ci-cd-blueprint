@@ -208,67 +208,69 @@ jobs:
     outputs:
       image_tag: ${{ steps.image.outputs.tag }}
 
-    # ================================
-    # Update K8s Manifests (Same Repo)
-    # ================================
-    update-k8s-manifests:
-      name: Update K8s Manifests
-      needs: [backend-build, frontend-build]
-      runs-on: ubuntu-latest
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  # ================================
+  # Update K8s Manifests (Same Repo)
+  # ================================
+  update-k8s-manifests:
+    name: Update K8s Manifests
+    needs: [backend-build, frontend-build]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-      steps:
-        - name: Checkout code
-          uses: actions/checkout@v4
-          with:
-            token: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-        - name: Update image tags in dev overlay
-          working-directory: k8s/overlays/dev
-          run: |
-            # Update backend image tag
-            kustomize edit set image \
-              registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
+      - name: Update image tags in dev overlay
+        working-directory: k8s/overlays/dev
+        run: |
+          # Update backend image tag
+          kustomize edit set image \
+            registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
 
-            # Update frontend image tag
-            kustomize edit set image \
-              registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
+          # Update frontend image tag
+          kustomize edit set image \
+            registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
 
-        - name: Update image tags in staging overlay
-          working-directory: k8s/overlays/staging
-          run: |
-            # Update backend image tag
-            kustomize edit set image \
-              registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
+      - name: Update image tags in staging overlay
+        working-directory: k8s/overlays/staging
+        run: |
+          # Update backend image tag
+          kustomize edit set image \
+            registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
 
-            # Update frontend image tag
-            kustomize edit set image \
-              registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
+          # Update frontend image tag
+          kustomize edit set image \
+            registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
 
-        - name: Update image tags in prod overlay
-          working-directory: k8s/overlays/prod
-          run: |
-            # Update backend image tag
-            kustomize edit set image \
-              registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
+      - name: Update image tags in prod overlay
+        working-directory: k8s/overlays/prod
+        run: |
+          # Update backend image tag
+          kustomize edit set image \
+            registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
 
-            # Update frontend image tag
-            kustomize edit set image \
-              registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
+          # Update frontend image tag
+          kustomize edit set image \
+            registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
 
-        - name: Commit and push changes
-          run: |
-            git config user.name "GitHub Actions"
-            git config user.email "actions@github.com"
-            git add k8s/overlays/*/kustomization.yaml
-            git commit -m "chore: update image tags to ${{ env.IMAGE_TAG }}
+      - name: Commit and push changes
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add k8s/overlays/*/kustomization.yaml
+          git commit -m "chore: update image tags to ${{ env.IMAGE_TAG }}
 
-            Backend: ${{ needs.backend-build.outputs.image_tag }}
-            Frontend: ${{ needs.frontend-build.outputs.image_tag }}
+          Backend: ${{ needs.backend-build.outputs.image_tag }}
+          Frontend: ${{ needs.frontend-build.outputs.image_tag }}
 
-            Commit: ${{ github.sha }}
-            Triggered by: ${{ github.actor }}"
-            git push  # ================================
+          Commit: ${{ github.sha }}
+          Triggered by: ${{ github.actor }}"
+          git push
+
+  # ================================
   # Deployment Summary
   # ================================
   deployment-summary:
