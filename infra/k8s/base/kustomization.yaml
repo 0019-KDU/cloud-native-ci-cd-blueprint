@@ -4,17 +4,12 @@ kind: Kustomization
 resources:
   - backend-deployment.yaml
   - frontend-deployment.yaml
-  - postgres-deployment.yaml
+  - postgres-statefulset.yaml
   - services.yaml
+  - configmap.yaml
+  - ingress.yaml
+  - networkpolicy.yaml
 
-# Common labels applied to all resources
 commonLabels:
   app.kubernetes.io/name: ai-incident-assistant
-  app.kubernetes.io/part-of: cloud-native-platform
-
-# Images that will be overridden by overlays
-images:
-  - name: registry.digitalocean.com/ai-incident-assistant/backend
-    newTag: latest
-  - name: registry.digitalocean.com/ai-incident-assistant/frontend
-    newTag: latest
+  app.kubernetes.io/part-of: incident-management

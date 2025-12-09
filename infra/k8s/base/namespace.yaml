@@ -1,0 +1,31 @@
+# Production-Grade Namespace Definitions
+# AI Incident Assistant - Environment-specific namespaces
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    name: dev
+    environment: development
+    app.kubernetes.io/managed-by: argocd
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    name: staging
+    environment: staging
+    app.kubernetes.io/managed-by: argocd
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
+  labels:
+    name: prod
+    environment: production
+    app.kubernetes.io/managed-by: argocd

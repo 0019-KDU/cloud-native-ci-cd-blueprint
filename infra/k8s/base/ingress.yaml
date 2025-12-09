@@ -1,0 +1,70 @@
+# Production-Grade Nginx Ingress
+# AI Incident Assistant - Route traffic to frontend and backend
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai-incident-assistant
+  labels:
+    app.kubernetes.io/component: ingress
+  annotations:
+    # Nginx Ingress Controller Annotations
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+    
+    # CORS Configuration
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization"
+    
+    # Rate Limiting (Production-grade)
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+    
+    # Timeouts
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    
+    # Security Headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: SAMEORIGIN";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+    
+    # Client Body Size
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+
+spec:
+  ingressClassName: nginx
+  
+  rules:
+  # Frontend routes (root path)
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 80
+      
+      # Backend API routes
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: backend
+            port:
+              number: 3001
+  
+  # TLS Configuration (optional - commented for initial setup)
+  # Uncomment and configure after obtaining certificates
+  # tls:
+  # - hosts:
+  #   - your-domain.com
+  #   - api.your-domain.com
+  #   secretName: ai-incident-tls

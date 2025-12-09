@@ -1,0 +1,27 @@
+# Production-Grade ConfigMap
+# AI Incident Assistant - Non-sensitive configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  labels:
+    app.kubernetes.io/component: api
+data:
+  # Database Configuration
+  DATABASE_HOST: postgres
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: incidents_db
+  
+  # Application Configuration
+  NODE_ENV: production
+  LOG_LEVEL: info
+  PORT: "3001"
+  
+  # CORS Configuration
+  CORS_ORIGIN: "*"
+  
+  # API Configuration
+  API_PREFIX: /api
+  
+  # Frontend Configuration (for frontend deployment)
+  VITE_API_URL: http://backend:3001/api

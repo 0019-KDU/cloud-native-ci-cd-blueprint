@@ -1,35 +1,93 @@
+# Staging Environment Overlay
+# AI Incident Assistant - Staging configuration with moderate resources
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: staging
-
+# Base reference
 resources:
 - ../../base
-- namespace.yaml
-- ingress.yaml
 
-# Override images with specific tags (updated by CI pipeline)
-images:
-- name: registry.digitalocean.com/ai-incident-assistant/backend
-  newName: registry.digitalocean.com/ai-incident-assistant/backend
-  newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
-- name: registry.digitalocean.com/ai-incident-assistant/frontend
-  newName: registry.digitalocean.com/ai-incident-assistant/frontend
-  newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
+# Target namespace
+namespace: staging
 
-# Environment-specific patches
+# Common labels for staging environment
+commonLabels:
+  environment: staging
+
+# Replica counts for staging (moderate HA)
+replicas:
+- name: backend
+  count: 2
+- name: frontend
+  count: 2
+
+# Resource patches for staging environment (moderate limits)
 patches:
-- path: patch-replicas.yaml
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: "75m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: "96Mi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "350m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "384Mi"
   target:
     kind: Deployment
+    name: backend
 
-# Environment-specific config
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: "40m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: "48Mi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "150m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "192Mi"
+  target:
+    kind: Deployment
+    name: frontend
+
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: "75m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: "192Mi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "375m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "768Mi"
+  target:
+    kind: StatefulSet
+    name: postgres
+
+# ConfigMap for staging-specific configuration
 configMapGenerator:
-- literals:
+- name: backend-config
+  behavior: merge
+  literals:
   - NODE_ENV=staging
-  name: backend-config
+  - LOG_LEVEL=info
+  - CORS_ORIGIN=*
 
-labels:
-- pairs:
-    environment: staging
-    managed-by: argocd
+# Image tags (will be updated by CI/CD pipeline)
+images:
+- name: registry.digitalocean.com/ai-incident-assistant/backend
+  newTag: staging-latest
+- name: registry.digitalocean.com/ai-incident-assistant/frontend
+  newTag: staging-latest
+
+

@@ -1,35 +1,91 @@
+# Production Environment Overlay
+# AI Incident Assistant - Production configuration with full resources
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# Base reference
+resources:
+- ../../base
+
+# Target namespace
 namespace: prod
 
-resources:
-  - ../../base
-  - namespace.yaml
-  - ingress.yaml
-
+# Common labels for production environment
 commonLabels:
   environment: production
-  managed-by: argocd
 
-images:
-  - name: registry.digitalocean.com/ai-incident-assistant/backend
-    newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
-  - name: registry.digitalocean.com/ai-incident-assistant/frontend
-    newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
-
+# Replica counts for production (high availability)
 replicas:
-  - name: backend
-    count: 3
-  - name: frontend
-    count: 3
-  - name: postgres
-    count: 1
+- name: backend
+  count: 3
+- name: frontend
+  count: 3
 
+# Resource patches for production environment (full resources)
 patches:
-  - path: patch-resources.yaml
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: "100m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: "128Mi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "500m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "512Mi"
+  target:
+    kind: Deployment
+    name: backend
 
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: "50m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: "64Mi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "200m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "256Mi"
+  target:
+    kind: Deployment
+    name: frontend
+
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: "100m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: "256Mi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "500m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "1Gi"
+  target:
+    kind: StatefulSet
+    name: postgres
+
+# ConfigMap for production-specific configuration
 configMapGenerator:
-  - name: backend-config
-    literals:
-      - NODE_ENV=production
+- name: backend-config
+  behavior: merge
+  literals:
+  - NODE_ENV=production
+  - LOG_LEVEL=warn
+  - CORS_ORIGIN=https://your-domain.com
+
+# Image tags (will be updated by CI/CD pipeline)
+images:
+- name: registry.digitalocean.com/ai-incident-assistant/backend
+  newTag: prod-latest
+- name: registry.digitalocean.com/ai-incident-assistant/frontend
+  newTag: prod-latest

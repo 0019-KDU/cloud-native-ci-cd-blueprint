@@ -1,35 +1,53 @@
+# Production-Grade Kubernetes Services
+# AI Incident Assistant - ClusterIP Services for all components
+---
 apiVersion: v1
 kind: Service
 metadata:
   name: backend
+  labels:
+    app.kubernetes.io/component: api
 spec:
-  selector:
-    app: backend
-  ports:
-  - port: 3001
-    targetPort: 3001
   type: ClusterIP
+  ports:
+  - name: http
+    port: 3001
+    targetPort: 3001
+    protocol: TCP
+  selector:
+    app.kubernetes.io/component: api
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: frontend
+  labels:
+    app.kubernetes.io/component: frontend
 spec:
-  selector:
-    app: frontend
-  ports:
-  - port: 80
-    targetPort: 80
   type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+    protocol: TCP
+  selector:
+    app.kubernetes.io/component: frontend
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: postgres
+  labels:
+    app.kubernetes.io/component: database
 spec:
-  selector:
-    app: postgres
-  ports:
-  - port: 5432
-    targetPort: 5432
   type: ClusterIP
+  clusterIP: None  # Headless service for StatefulSet
+  ports:
+  - name: postgresql
+    port: 5432
+    targetPort: 5432
+    protocol: TCP
+  selector:
+    app.kubernetes.io/component: database

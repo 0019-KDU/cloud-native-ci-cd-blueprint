@@ -1,72 +1,143 @@
+# Production-Grade Backend Deployment
+# AI Incident Assistant - Node.js + Express API
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend
+  labels:
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "1.0.0"
 spec:
-  replicas: 1
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
-      app: backend
+      app.kubernetes.io/component: api
   template:
     metadata:
       labels:
-        app: backend
+        app.kubernetes.io/component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3001"
+        prometheus.io/path: "/metrics"
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      
       containers:
       - name: backend
         image: registry.digitalocean.com/ai-incident-assistant/backend:latest
+        imagePullPolicy: Always
+        
         ports:
-        - containerPort: 3001
+        - name: http
+          containerPort: 3001
+          protocol: TCP
+        
         env:
+        - name: NODE_ENV
+          value: "production"
         - name: PORT
           value: "3001"
-        - name: NODE_ENV
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: NODE_ENV
         - name: DATABASE_HOST
-          value: postgres
+          value: "postgres"
         - name: DATABASE_PORT
           value: "5432"
         - name: DATABASE_NAME
           valueFrom:
-            secretKeyRef:
-              name: postgres-secret
-              key: POSTGRES_DB
+            configMapKeyRef:
+              name: backend-config
+              key: DATABASE_NAME
         - name: DATABASE_USER
           valueFrom:
             secretKeyRef:
               name: postgres-secret
-              key: POSTGRES_USER
+              key: username
         - name: DATABASE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: postgres-secret
-              key: POSTGRES_PASSWORD
+              key: password
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
-              name: backend-secrets
-              key: OPENAI_API_KEY
+              name: backend-secret
+              key: openai-api-key
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: backend-config
+              key: LOG_LEVEL
+        
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        
         livenessProbe:
           httpGet:
             path: /health
-            port: 3001
+            port: http
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        
         readinessProbe:
           httpGet:
             path: /health
-            port: 3001
+            port: http
           initialDelaySeconds: 10
           periodSeconds: 5
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "200m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-      imagePullSecrets:
-      - name: ai-incident-assistant
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+              - ALL
+        
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: logs
+          mountPath: /app/logs
+      
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: logs
+        emptyDir: {}
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - api
+              topologyKey: kubernetes.io/hostname
+      
+      terminationGracePeriodSeconds: 30
