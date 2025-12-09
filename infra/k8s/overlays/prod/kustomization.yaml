@@ -4,33 +4,35 @@ kind: Kustomization
 namespace: prod
 
 resources:
-  - ../../base
-  - namespace.yaml
-  - ingress.yaml
+- ../../base
+- namespace.yaml
+- ingress.yaml
 
 # Override images with specific tags (updated by CI pipeline)
 images:
-  - name: registry.digitalocean.com/ai-incident-assistant/backend
-    newTag: latest
-  - name: registry.digitalocean.com/ai-incident-assistant/frontend
-    newTag: latest
+- name: registry.digitalocean.com/ai-incident-assistant/backend
+  newName: registry.digitalocean.com/ai-incident-assistant/backend
+  newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
+- name: registry.digitalocean.com/ai-incident-assistant/frontend
+  newName: registry.digitalocean.com/ai-incident-assistant/frontend
+  newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
 
 # Environment-specific patches
 patches:
-  - path: patch-replicas.yaml
-    target:
-      kind: Deployment
-  - path: patch-resources.yaml
-    target:
-      kind: Deployment
+- path: patch-replicas.yaml
+  target:
+    kind: Deployment
+- path: patch-resources.yaml
+  target:
+    kind: Deployment
 
 # Environment-specific config
 configMapGenerator:
-  - name: backend-config
-    literals:
-      - NODE_ENV=production
+- literals:
+  - NODE_ENV=production
+  name: backend-config
 
 labels:
-  - pairs:
-      environment: production
-      managed-by: argocd
+- pairs:
+    environment: production
+    managed-by: argocd
