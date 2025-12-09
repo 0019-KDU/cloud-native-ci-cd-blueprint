@@ -31,7 +31,7 @@ const config = {
     // Connection pool settings
     max: 20, // Maximum number of connections in pool
     idleTimeoutMillis: 30000, // Close idle connections after 30 seconds
-    connectionTimeoutMillis: 2000, // Timeout after 2 seconds if can't connect
+    connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT || '10000', 10), // Timeout in milliseconds
   },
 
   // OpenAI API configuration

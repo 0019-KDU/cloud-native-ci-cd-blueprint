@@ -11,6 +11,7 @@ data:
   DATABASE_HOST: postgres
   DATABASE_PORT: "5432"
   DATABASE_NAME: incidents_db
+  DB_CONNECTION_TIMEOUT: "10000"
   
   # Application Configuration
   NODE_ENV: production

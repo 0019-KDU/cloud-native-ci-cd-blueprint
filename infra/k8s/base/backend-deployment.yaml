@@ -77,6 +77,8 @@ spec:
             configMapKeyRef:
               name: backend-config
               key: LOG_LEVEL
+        - name: DB_CONNECTION_TIMEOUT
+          value: "10000"
         
         resources:
           requests:
