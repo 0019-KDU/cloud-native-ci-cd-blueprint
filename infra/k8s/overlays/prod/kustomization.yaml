@@ -4,19 +4,21 @@ kind: Kustomization
 namespace: prod
 
 resources:
-  - ../../base
-  - namespace.yaml
-  - ingress.yaml
+- ../../base
+- namespace.yaml
+- ingress.yaml
 
 commonLabels:
   environment: production
   managed-by: argocd
 
 images:
-  - name: registry.digitalocean.com/ai-incident-assistant/backend
-    newTag: latest
-  - name: registry.digitalocean.com/ai-incident-assistant/frontend
-    newTag: latest
+- name: registry.digitalocean.com/ai-incident-assistant/backend
+  newName: registry.digitalocean.com/ai-incident-assistant/backend
+  newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
+- name: registry.digitalocean.com/ai-incident-assistant/frontend
+  newName: registry.digitalocean.com/ai-incident-assistant/frontend
+  newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
 
 patches:
   - path: patch-replicas.yaml
