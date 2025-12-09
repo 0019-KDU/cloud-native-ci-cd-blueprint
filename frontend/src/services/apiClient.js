@@ -18,7 +18,8 @@
 
 // Get API URL from environment variable
 // Vite exposes env vars that start with VITE_ to the client
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Use empty string if VITE_API_URL is explicitly set to empty, otherwise fallback to localhost
+const API_BASE_URL = import.meta.env.VITE_API_URL !== undefined ? import.meta.env.VITE_API_URL : 'http://localhost:3001';
 
 /**
  * Makes an HTTP request to the backend API
