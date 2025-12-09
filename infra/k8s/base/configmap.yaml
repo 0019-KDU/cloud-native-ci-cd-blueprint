@@ -25,5 +25,5 @@ data:
   API_PREFIX: /api
   
   # Frontend Configuration (for frontend deployment)
-  # Using relative URL since frontend and backend are behind same ingress
-  VITE_API_URL: /api
+  # Empty base URL since API paths already include /api prefix
+  VITE_API_URL: ""
