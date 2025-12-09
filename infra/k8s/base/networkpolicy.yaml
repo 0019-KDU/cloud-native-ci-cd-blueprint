@@ -36,17 +36,18 @@ spec:
       port: 3001
   
   egress:
-  # Allow DNS resolution
+  # Allow DNS resolution (to kube-system CoreDNS)
   - to:
-    - namespaceSelector: {}
-      podSelector:
+    - namespaceSelector:
         matchLabels:
-          k8s-app: kube-dns
+          kubernetes.io/metadata.name: kube-system
     ports:
     - protocol: UDP
       port: 53
+    - protocol: TCP
+      port: 53
   
-  # Allow connections to PostgreSQL
+  # Allow connections to PostgreSQL in same namespace
   - to:
     - podSelector:
         matchLabels:
@@ -56,9 +57,7 @@ spec:
       port: 5432
   
   # Allow HTTPS to external services (OpenAI API)
-  - to:
-    - namespaceSelector: {}
-    ports:
+  - ports:
     - protocol: TCP
       port: 443
 
@@ -89,17 +88,18 @@ spec:
       port: 80
   
   egress:
-  # Allow DNS resolution
+  # Allow DNS resolution (to kube-system CoreDNS)
   - to:
-    - namespaceSelector: {}
-      podSelector:
+    - namespaceSelector:
         matchLabels:
-          k8s-app: kube-dns
+          kubernetes.io/metadata.name: kube-system
     ports:
     - protocol: UDP
       port: 53
+    - protocol: TCP
+      port: 53
   
-  # Allow connections to backend API
+  # Allow connections to backend API in same namespace
   - to:
     - podSelector:
         matchLabels:
@@ -135,14 +135,15 @@ spec:
       port: 5432
   
   egress:
-  # Allow DNS resolution
+  # Allow DNS resolution (to kube-system CoreDNS)
   - to:
-    - namespaceSelector: {}
-      podSelector:
+    - namespaceSelector:
         matchLabels:
-          k8s-app: kube-dns
+          kubernetes.io/metadata.name: kube-system
     ports:
     - protocol: UDP
+      port: 53
+    - protocol: TCP
       port: 53
   
   # Allow PostgreSQL replication (for future HA setup)
