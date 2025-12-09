@@ -86,7 +86,7 @@ jobs:
             -t ${{ env.REGISTRY }}/backend:${{ env.IMAGE_TAG }} \
             -t ${{ env.REGISTRY }}/backend:latest \
             -f infra/docker/backend.Dockerfile \
-            ./backend
+            .
 
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@master
@@ -180,7 +180,7 @@ jobs:
             -t ${{ env.REGISTRY }}/frontend:${{ env.IMAGE_TAG }} \
             -t ${{ env.REGISTRY }}/frontend:latest \
             -f infra/docker/frontend.Dockerfile \
-            ./frontend
+            .
 
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@master
