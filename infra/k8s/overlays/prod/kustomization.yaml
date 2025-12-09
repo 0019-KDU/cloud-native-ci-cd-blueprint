@@ -4,22 +4,32 @@ kind: Kustomization
 namespace: prod
 
 resources:
-- ../../base
-- namespace.yaml
-- ingress.yaml
+  - ../../base
+  - namespace.yaml
+  - ingress.yaml
 
 commonLabels:
   environment: production
   managed-by: argocd
 
 images:
-- name: registry.digitalocean.com/ai-incident-assistant/backend
-  newName: registry.digitalocean.com/ai-incident-assistant/backend
-  newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
-- name: registry.digitalocean.com/ai-incident-assistant/frontend
-  newName: registry.digitalocean.com/ai-incident-assistant/frontend
-  newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
+  - name: registry.digitalocean.com/ai-incident-assistant/backend
+    newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
+  - name: registry.digitalocean.com/ai-incident-assistant/frontend
+    newTag: 4b9a0c1cdc98639dd88bd8217d6c1d161c48f94d
+
+replicas:
+  - name: backend
+    count: 3
+  - name: frontend
+    count: 3
+  - name: postgres
+    count: 1
 
 patches:
-  - path: patch-replicas.yaml
   - path: patch-resources.yaml
+
+configMapGenerator:
+  - name: backend-config
+    literals:
+      - NODE_ENV=production
