@@ -48,21 +48,21 @@ spec:
           value: "production"
         - name: PORT
           value: "3001"
-        - name: DATABASE_HOST
+        - name: DB_HOST
           value: "postgres"
-        - name: DATABASE_PORT
+        - name: DB_PORT
           value: "5432"
-        - name: DATABASE_NAME
+        - name: DB_NAME
           valueFrom:
             configMapKeyRef:
               name: backend-config
               key: DATABASE_NAME
-        - name: DATABASE_USER
+        - name: DB_USER
           valueFrom:
             secretKeyRef:
               name: postgres-secret
               key: username
-        - name: DATABASE_PASSWORD
+        - name: DB_PASSWORD
           valueFrom:
             secretKeyRef:
               name: postgres-secret
