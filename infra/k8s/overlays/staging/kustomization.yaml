@@ -86,8 +86,8 @@ configMapGenerator:
 # Image tags (will be updated by CI/CD pipeline)
 images:
 - name: registry.digitalocean.com/ai-incident-assistant/backend
-  newTag: staging-latest
+  newTag: latest
 - name: registry.digitalocean.com/ai-incident-assistant/frontend
-  newTag: staging-latest
+  newTag: latest
 
 
