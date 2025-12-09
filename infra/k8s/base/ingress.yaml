@@ -10,6 +10,7 @@ metadata:
     # Nginx Ingress Controller Annotations
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
     
     # CORS Configuration
     nginx.ingress.kubernetes.io/enable-cors: "true"
@@ -51,9 +52,9 @@ spec:
             port:
               number: 80
       
-      # Backend API routes
-      - path: /api
-        pathType: Prefix
+      # Backend API routes - strip /api prefix
+      - path: /api(/|$)(.*)
+        pathType: ImplementationSpecific
         backend:
           service:
             name: backend
