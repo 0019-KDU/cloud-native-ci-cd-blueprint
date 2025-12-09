@@ -25,4 +25,5 @@ data:
   API_PREFIX: /api
   
   # Frontend Configuration (for frontend deployment)
-  VITE_API_URL: http://backend:3001/api
+  # Using relative URL since frontend and backend are behind same ingress
+  VITE_API_URL: /api
