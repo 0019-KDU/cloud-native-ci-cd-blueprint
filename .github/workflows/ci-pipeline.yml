@@ -224,7 +224,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update image tags in dev overlay
-        working-directory: k8s/overlays/dev
+        working-directory: infra/k8s/overlays/dev
         run: |
           # Update backend image tag
           kustomize edit set image \
@@ -235,7 +235,7 @@ jobs:
             registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
 
       - name: Update image tags in staging overlay
-        working-directory: k8s/overlays/staging
+        working-directory: infra/k8s/overlays/staging
         run: |
           # Update backend image tag
           kustomize edit set image \
@@ -246,7 +246,7 @@ jobs:
             registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
 
       - name: Update image tags in prod overlay
-        working-directory: k8s/overlays/prod
+        working-directory: infra/k8s/overlays/prod
         run: |
           # Update backend image tag
           kustomize edit set image \
@@ -260,7 +260,7 @@ jobs:
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add k8s/overlays/*/kustomization.yaml
+          git add infra/k8s/overlays/*/kustomization.yaml
           git commit -m "chore: update image tags to ${{ env.IMAGE_TAG }}
 
           Backend: ${{ needs.backend-build.outputs.image_tag }}
@@ -293,9 +293,9 @@ jobs:
           Repository: `cloud-native-ci-cd-blueprint`
 
           Image tags updated in:
-          - ✅ `k8s/overlays/dev/kustomization.yaml`
-          - ✅ `k8s/overlays/staging/kustomization.yaml`
-          - ✅ `k8s/overlays/prod/kustomization.yaml`
+          - ✅ `infra/k8s/overlays/dev/kustomization.yaml`
+          - ✅ `infra/k8s/overlays/staging/kustomization.yaml`
+          - ✅ `infra/k8s/overlays/prod/kustomization.yaml`
 
           ### 🎯 ArgoCD Deployment Status
           - **Dev**: 🟢 Auto-sync enabled (deploying now)
