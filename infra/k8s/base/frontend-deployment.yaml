@@ -46,7 +46,7 @@ spec:
           valueFrom:
             configMapKeyRef:
               name: backend-config
-              key: API_URL
+              key: VITE_API_URL
         
         resources:
           requests:
