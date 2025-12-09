@@ -1,320 +1,314 @@
 name: CI Pipeline - Build Once Deploy Many
 
 on:
-    push:
-        branches: [main]
-        paths:
-            - "backend/**"
-            - "frontend/**"
-            - ".github/workflows/ci-pipeline.yml"
-    pull_request:
-        branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/ci-pipeline.yml"
+  pull_request:
+    branches: [main]
 
 env:
-    REGISTRY: registry.digitalocean.com/ai-incident-assistant
-    IMAGE_TAG: ${{ github.sha }}
-    GITOPS_REPO: 0019-KDU/cloud-native-infrastructure
+  REGISTRY: registry.digitalocean.com/ai-incident-assistant
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
-    # ================================
-    # Backend Pipeline
-    # ================================
-    backend-test:
-        name: Backend - Test & Quality
-        runs-on: ubuntu-latest
-        defaults:
-            run:
-                working-directory: ./backend
+  # ================================
+  # Backend Pipeline
+  # ================================
+  backend-test:
+    name: Backend - Test & Quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Setup Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "20"
-                  cache: "npm"
-                  cache-dependency-path: backend/package-lock.json
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
 
-            - name: Install dependencies
-              run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-            - name: Run linter
-              run: npm run lint || true
+      - name: Run linter
+        run: npm run lint || true
 
-            - name: Run unit tests
-              run: npm test
+      - name: Run unit tests
+        run: npm test
 
-            - name: Generate coverage report
-              run: npm test -- --coverage --coverageReporters=lcov
+      - name: Generate coverage report
+        run: npm test -- --coverage --coverageReporters=lcov
 
-            - name: SonarQube Scan
-              uses: sonarsource/sonarqube-scan-action@master
-              env:
-                  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-                  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-              with:
-                  projectBaseDir: backend
-                  args: >
-                      -Dsonar.projectKey=ai-incident-assistant-backend
-                      -Dsonar.sources=src
-                      -Dsonar.tests=src
-                      -Dsonar.test.inclusions=**/*.test.js
-                      -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: backend
+          args: >
+            -Dsonar.projectKey=ai-incident-assistant-backend
+            -Dsonar.sources=src
+            -Dsonar.tests=src
+            -Dsonar.test.inclusions=**/*.test.js
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
-    backend-build:
-        name: Backend - Build & Push Image
-        needs: backend-test
-        runs-on: ubuntu-latest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  backend-build:
+    name: Backend - Build & Push Image
+    needs: backend-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Install doctl
-              uses: digitalocean/action-doctl@v2
-              with:
-                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-            - name: Log in to DigitalOcean Container Registry
-              run: doctl registry login --expiry-seconds 1200
+      - name: Log in to DigitalOcean Container Registry
+        run: doctl registry login --expiry-seconds 1200
 
-            - name: Build backend image
-              run: |
-                  docker build \
-                    -t ${{ env.REGISTRY }}/backend:${{ env.IMAGE_TAG }} \
-                    -t ${{ env.REGISTRY }}/backend:latest \
-                    -f infra/docker/backend.Dockerfile \
-                    ./backend
+      - name: Build backend image
+        run: |
+          docker build \
+            -t ${{ env.REGISTRY }}/backend:${{ env.IMAGE_TAG }} \
+            -t ${{ env.REGISTRY }}/backend:latest \
+            -f infra/docker/backend.Dockerfile \
+            ./backend
 
-            - name: Scan image with Trivy
-              uses: aquasecurity/trivy-action@master
-              with:
-                  image-ref: ${{ env.REGISTRY }}/backend:${{ env.IMAGE_TAG }}
-                  format: "sarif"
-                  output: "trivy-backend-results.sarif"
-                  severity: "CRITICAL,HIGH"
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/backend:${{ env.IMAGE_TAG }}
+          format: "sarif"
+          output: "trivy-backend-results.sarif"
+          severity: "CRITICAL,HIGH"
 
-            - name: Upload Trivy results to GitHub Security
-              uses: github/codeql-action/upload-sarif@v3
-              with:
-                  sarif_file: "trivy-backend-results.sarif"
-                  category: "backend-container-scan"
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "trivy-backend-results.sarif"
+          category: "backend-container-scan"
 
-            - name: Push image to registry
-              run: |
-                  docker push ${{ env.REGISTRY }}/backend:${{ env.IMAGE_TAG }}
-                  docker push ${{ env.REGISTRY }}/backend:latest
+      - name: Push image to registry
+        run: |
+          docker push ${{ env.REGISTRY }}/backend:${{ env.IMAGE_TAG }}
+          docker push ${{ env.REGISTRY }}/backend:latest
 
-            - name: Output image tag
-              id: image
-              run: echo "tag=${{ env.IMAGE_TAG }}" >> $GITHUB_OUTPUT
+      - name: Output image tag
+        id: image
+        run: echo "tag=${{ env.IMAGE_TAG }}" >> $GITHUB_OUTPUT
 
-        outputs:
-            image_tag: ${{ steps.image.outputs.tag }}
+    outputs:
+      image_tag: ${{ steps.image.outputs.tag }}
 
-    # ================================
-    # Frontend Pipeline
-    # ================================
-    frontend-test:
-        name: Frontend - Test & Quality
-        runs-on: ubuntu-latest
-        defaults:
-            run:
-                working-directory: ./frontend
+  # ================================
+  # Frontend Pipeline
+  # ================================
+  frontend-test:
+    name: Frontend - Test & Quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Setup Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "20"
-                  cache: "npm"
-                  cache-dependency-path: frontend/package-lock.json
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
 
-            - name: Install dependencies
-              run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-            - name: Run linter
-              run: npm run lint || true
+      - name: Run linter
+        run: npm run lint || true
 
-            - name: Build frontend
-              run: npm run build
+      - name: Build frontend
+        run: npm run build
 
-            - name: SonarQube Scan
-              uses: sonarsource/sonarqube-scan-action@master
-              env:
-                  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-                  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-              with:
-                  projectBaseDir: frontend
-                  args: >
-                      -Dsonar.projectKey=ai-incident-assistant-frontend
-                      -Dsonar.sources=src
-                      -Dsonar.javascript.node.maxspace=4096
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: frontend
+          args: >
+            -Dsonar.projectKey=ai-incident-assistant-frontend
+            -Dsonar.sources=src
+            -Dsonar.javascript.node.maxspace=4096
 
-    frontend-build:
-        name: Frontend - Build & Push Image
-        needs: frontend-test
-        runs-on: ubuntu-latest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  frontend-build:
+    name: Frontend - Build & Push Image
+    needs: frontend-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Install doctl
-              uses: digitalocean/action-doctl@v2
-              with:
-                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-            - name: Log in to DigitalOcean Container Registry
-              run: doctl registry login --expiry-seconds 1200
+      - name: Log in to DigitalOcean Container Registry
+        run: doctl registry login --expiry-seconds 1200
 
-            - name: Build frontend image
-              run: |
-                  docker build \
-                    -t ${{ env.REGISTRY }}/frontend:${{ env.IMAGE_TAG }} \
-                    -t ${{ env.REGISTRY }}/frontend:latest \
-                    -f infra/docker/frontend.Dockerfile \
-                    ./frontend
+      - name: Build frontend image
+        run: |
+          docker build \
+            -t ${{ env.REGISTRY }}/frontend:${{ env.IMAGE_TAG }} \
+            -t ${{ env.REGISTRY }}/frontend:latest \
+            -f infra/docker/frontend.Dockerfile \
+            ./frontend
 
-            - name: Scan image with Trivy
-              uses: aquasecurity/trivy-action@master
-              with:
-                  image-ref: ${{ env.REGISTRY }}/frontend:${{ env.IMAGE_TAG }}
-                  format: "sarif"
-                  output: "trivy-frontend-results.sarif"
-                  severity: "CRITICAL,HIGH"
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/frontend:${{ env.IMAGE_TAG }}
+          format: "sarif"
+          output: "trivy-frontend-results.sarif"
+          severity: "CRITICAL,HIGH"
 
-            - name: Upload Trivy results to GitHub Security
-              uses: github/codeql-action/upload-sarif@v3
-              with:
-                  sarif_file: "trivy-frontend-results.sarif"
-                  category: "frontend-container-scan"
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "trivy-frontend-results.sarif"
+          category: "frontend-container-scan"
 
-            - name: Push image to registry
-              run: |
-                  docker push ${{ env.REGISTRY }}/frontend:${{ env.IMAGE_TAG }}
-                  docker push ${{ env.REGISTRY }}/frontend:latest
+      - name: Push image to registry
+        run: |
+          docker push ${{ env.REGISTRY }}/frontend:${{ env.IMAGE_TAG }}
+          docker push ${{ env.REGISTRY }}/frontend:latest
 
-            - name: Output image tag
-              id: image
-              run: echo "tag=${{ env.IMAGE_TAG }}" >> $GITHUB_OUTPUT
+      - name: Output image tag
+        id: image
+        run: echo "tag=${{ env.IMAGE_TAG }}" >> $GITHUB_OUTPUT
 
-        outputs:
-            image_tag: ${{ steps.image.outputs.tag }}
-
-    # ================================
-    # Update GitOps Repository
-    # ================================
-    update-gitops:
-        name: Update GitOps Manifests
-        needs: [backend-build, frontend-build]
-        runs-on: ubuntu-latest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-        steps:
-            - name: Checkout GitOps repository
-              uses: actions/checkout@v4
-              with:
-                  repository: ${{ env.GITOPS_REPO }}
-                  token: ${{ secrets.GITOPS_PAT }}
-                  path: gitops
-
-            - name: Update image tags in dev overlay
-              working-directory: gitops/k8s/overlays/dev
-              run: |
-                  # Update backend image tag
-                  kustomize edit set image \
-                    registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
-
-                  # Update frontend image tag
-                  kustomize edit set image \
-                    registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
-
-            - name: Update image tags in staging overlay
-              working-directory: gitops/k8s/overlays/staging
-              run: |
-                  # Update backend image tag
-                  kustomize edit set image \
-                    registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
-
-                  # Update frontend image tag
-                  kustomize edit set image \
-                    registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
-
-            - name: Update image tags in prod overlay
-              working-directory: gitops/k8s/overlays/prod
-              run: |
-                  # Update backend image tag
-                  kustomize edit set image \
-                    registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
-
-                  # Update frontend image tag
-                  kustomize edit set image \
-                    registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
-
-            - name: Commit and push changes
-              working-directory: gitops
-              run: |
-                  git config user.name "GitHub Actions"
-                  git config user.email "actions@github.com"
-                  git add k8s/overlays/*/kustomization.yaml
-                  git commit -m "chore: update image tags to ${{ env.IMAGE_TAG }}
-
-                  Backend: ${{ needs.backend-build.outputs.image_tag }}
-                  Frontend: ${{ needs.frontend-build.outputs.image_tag }}
-
-                  Commit: ${{ github.sha }}
-                  Triggered by: ${{ github.actor }}"
-                  git push
+    outputs:
+      image_tag: ${{ steps.image.outputs.tag }}
 
     # ================================
-    # Deployment Summary
+    # Update K8s Manifests (Same Repo)
     # ================================
-    deployment-summary:
-        name: Deployment Summary
-        needs: [update-gitops]
-        runs-on: ubuntu-latest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    update-k8s-manifests:
+      name: Update K8s Manifests
+      needs: [backend-build, frontend-build]
+      runs-on: ubuntu-latest
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-        steps:
-            - name: Create deployment summary
-              run: |
-                  cat >> $GITHUB_STEP_SUMMARY << 'EOF'
-                  ## 🚀 Deployment Pipeline Summary
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v4
+          with:
+            token: ${{ secrets.GITHUB_TOKEN }}
 
-                  ### ✅ Images Built and Pushed
-                  - **Backend**: `registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}`
-                  - **Frontend**: `registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}`
+        - name: Update image tags in dev overlay
+          working-directory: k8s/overlays/dev
+          run: |
+            # Update backend image tag
+            kustomize edit set image \
+              registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
 
-                  ### 📝 GitOps Repository Updated
-                  Repository: `${{ env.GITOPS_REPO }}`
+            # Update frontend image tag
+            kustomize edit set image \
+              registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
 
-                  Image tags updated in:
-                  - ✅ `k8s/overlays/dev/kustomization.yaml`
-                  - ✅ `k8s/overlays/staging/kustomization.yaml`
-                  - ✅ `k8s/overlays/prod/kustomization.yaml`
+        - name: Update image tags in staging overlay
+          working-directory: k8s/overlays/staging
+          run: |
+            # Update backend image tag
+            kustomize edit set image \
+              registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
 
-                  ### 🎯 ArgoCD Deployment Status
-                  - **Dev**: 🟢 Auto-sync enabled (deploying now)
-                  - **Staging**: 🟡 Manual sync required (awaiting approval)
-                  - **Production**: 🟡 Manual sync required (awaiting approval)
+            # Update frontend image tag
+            kustomize edit set image \
+              registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
 
-                  ### 🔗 Next Steps
-                  1. Verify dev deployment in ArgoCD
-                  2. Run E2E tests against dev environment
-                  3. Manually sync staging in ArgoCD
-                  4. Run staging validation tests
-                  5. Manually sync production in ArgoCD
+        - name: Update image tags in prod overlay
+          working-directory: k8s/overlays/prod
+          run: |
+            # Update backend image tag
+            kustomize edit set image \
+              registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}
 
-                  ---
-                  **Commit**: ${{ github.sha }}
-                  **Triggered by**: ${{ github.actor }}
-                  **Workflow**: ${{ github.workflow }}
-                  EOF
+            # Update frontend image tag
+            kustomize edit set image \
+              registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}
+
+        - name: Commit and push changes
+          run: |
+            git config user.name "GitHub Actions"
+            git config user.email "actions@github.com"
+            git add k8s/overlays/*/kustomization.yaml
+            git commit -m "chore: update image tags to ${{ env.IMAGE_TAG }}
+
+            Backend: ${{ needs.backend-build.outputs.image_tag }}
+            Frontend: ${{ needs.frontend-build.outputs.image_tag }}
+
+            Commit: ${{ github.sha }}
+            Triggered by: ${{ github.actor }}"
+            git push  # ================================
+  # Deployment Summary
+  # ================================
+  deployment-summary:
+    name: Deployment Summary
+    needs: [update-k8s-manifests]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Create deployment summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          ## 🚀 Deployment Pipeline Summary
+
+          ### ✅ Images Built and Pushed
+          - **Backend**: `registry.digitalocean.com/ai-incident-assistant/backend:${{ env.IMAGE_TAG }}`
+          - **Frontend**: `registry.digitalocean.com/ai-incident-assistant/frontend:${{ env.IMAGE_TAG }}`
+
+          ### 📝 K8s Manifests Updated
+          Repository: `cloud-native-ci-cd-blueprint`
+
+          Image tags updated in:
+          - ✅ `k8s/overlays/dev/kustomization.yaml`
+          - ✅ `k8s/overlays/staging/kustomization.yaml`
+          - ✅ `k8s/overlays/prod/kustomization.yaml`
+
+          ### 🎯 ArgoCD Deployment Status
+          - **Dev**: 🟢 Auto-sync enabled (deploying now)
+          - **Staging**: 🟡 Manual sync required (awaiting approval)
+          - **Production**: 🟡 Manual sync required (awaiting approval)
+
+          ### 🔗 Next Steps
+          1. Verify dev deployment in ArgoCD
+          2. Run E2E tests against dev environment
+          3. Manually sync staging in ArgoCD
+          4. Run staging validation tests
+          5. Manually sync production in ArgoCD
+
+          ---
+          **Commit**: ${{ github.sha }}
+          **Triggered by**: ${{ github.actor }}
+          **Workflow**: ${{ github.workflow }}
+          EOF
