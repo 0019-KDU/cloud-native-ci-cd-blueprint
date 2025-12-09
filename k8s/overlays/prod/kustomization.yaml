@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: prod
+
+resources:
+  - ../../base
+  - namespace.yaml
+  - ingress.yaml
+
+# Override images with specific tags (updated by CI pipeline)
+images:
+  - name: registry.digitalocean.com/ai-incident-assistant/backend
+    newTag: latest
+  - name: registry.digitalocean.com/ai-incident-assistant/frontend
+    newTag: latest
+
+# Environment-specific patches
+patches:
+  - path: patch-replicas.yaml
+    target:
+      kind: Deployment
+  - path: patch-resources.yaml
+    target:
+      kind: Deployment
+
+# Environment-specific config
+configMapGenerator:
+  - name: backend-config
+    literals:
+      - NODE_ENV=production
+
+labels:
+  - pairs:
+      environment: production
+      managed-by: argocd
