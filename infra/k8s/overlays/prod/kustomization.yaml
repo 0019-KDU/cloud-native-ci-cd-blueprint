@@ -74,6 +74,32 @@ patches:
     kind: StatefulSet
     name: postgres
 
+# Ingress host patch for production
+- patch: |-
+    - op: replace
+      path: /spec/rules/0
+      value:
+        host: prod.174.138.120.13.nip.io
+        http:
+          paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 3001
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+  target:
+    kind: Ingress
+    name: ai-incident-assistant
+
 # ConfigMap for production-specific configuration
 configMapGenerator:
 - behavior: merge
