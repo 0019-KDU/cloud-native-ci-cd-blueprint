@@ -280,6 +280,7 @@ jobs:
                   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
     # ================================
+    # ================================
     # Post-Deployment Smoke Tests
     # ================================
     post-deployment-smoke:
@@ -299,7 +300,7 @@ jobs:
                   attempt=0
 
                   while [ $attempt -lt $max_attempts ]; do
-                    if curl -f -s "${{ env.PROD_URL }}/api/health" > /dev/null; then
+                    if curl -f -s "${{ env.PROD_URL }}/api" > /dev/null; then
                       echo "✅ Production is healthy!"
                       exit 0
                     fi
