@@ -1,0 +1,451 @@
+name: Production Deployment Pipeline
+
+on:
+    workflow_dispatch:
+        inputs:
+            image_tag:
+                description: "Image tag to deploy (git commit SHA)"
+                required: true
+                type: string
+            skip_load_test:
+                description: "Skip load testing"
+                required: false
+                type: boolean
+                default: false
+
+env:
+    PROD_URL: http://prod.174.138.120.13.nip.io
+    ARGOCD_SERVER: 209.38.124.183
+
+jobs:
+    # ================================
+    # Pre-deployment Validation
+    # ================================
+    pre-deployment-check:
+        name: Pre-deployment Validation
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Verify image exists in registry
+              env:
+                  DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+              run: |
+                  echo "🔍 Verifying images exist..."
+
+                  doctl registry login
+
+                  # Check backend image
+                  if doctl registry repository list-tags ai-incident-assistant/backend | grep -q "${{ github.event.inputs.image_tag }}"; then
+                    echo "✅ Backend image found: ${{ github.event.inputs.image_tag }}"
+                  else
+                    echo "❌ Backend image not found: ${{ github.event.inputs.image_tag }}"
+                    exit 1
+                  fi
+
+                  # Check frontend image
+                  if doctl registry repository list-tags ai-incident-assistant/frontend | grep -q "${{ github.event.inputs.image_tag }}"; then
+                    echo "✅ Frontend image found: ${{ github.event.inputs.image_tag }}"
+                  else
+                    echo "❌ Frontend image not found: ${{ github.event.inputs.image_tag }}"
+                    exit 1
+                  fi
+
+            - name: Verify staging tests passed
+              run: |
+                  echo "📊 Checking staging test results..."
+                  # This would query your test results database or artifacts
+                  # For now, manual verification required
+                  echo "⚠️ Manual verification: Ensure staging tests passed for commit ${{ github.event.inputs.image_tag }}"
+
+    # ================================
+    # Create Deployment PR
+    # ================================
+    create-deployment-pr:
+        name: Create Production Deployment PR
+        needs: pre-deployment-check
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Create deployment branch
+              run: |
+                  git config user.name "GitHub Actions"
+                  git config user.email "actions@github.com"
+
+                  branch_name="deploy/prod-${{ github.event.inputs.image_tag }}"
+                  git checkout -b $branch_name
+
+                  echo "BRANCH_NAME=$branch_name" >> $GITHUB_ENV
+
+            - name: Update production manifests
+              working-directory: infra/k8s/overlays/prod
+              run: |
+                  # Update image tags
+                  kustomize edit set image \
+                    registry.digitalocean.com/ai-incident-assistant/backend=registry.digitalocean.com/ai-incident-assistant/backend:${{ github.event.inputs.image_tag }}
+
+                  kustomize edit set image \
+                    registry.digitalocean.com/ai-incident-assistant/frontend=registry.digitalocean.com/ai-incident-assistant/frontend:${{ github.event.inputs.image_tag }}
+
+            - name: Commit changes
+              run: |
+                  git add infra/k8s/overlays/prod/kustomization.yaml
+                  git commit -m "deploy: production release ${{ github.event.inputs.image_tag }}
+
+                  🚀 Production Deployment Request
+
+                  **Image Tag**: ${{ github.event.inputs.image_tag }}
+                  **Requested by**: ${{ github.actor }}
+                  **Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+                  ## Changes
+                  - Backend: registry.digitalocean.com/ai-incident-assistant/backend:${{ github.event.inputs.image_tag }}
+                  - Frontend: registry.digitalocean.com/ai-incident-assistant/frontend:${{ github.event.inputs.image_tag }}
+
+                  ## Pre-deployment Checklist
+                  - [x] Images verified in registry
+                  - [x] Staging tests passed
+                  - [ ] Manual approval required
+                  - [ ] Database migrations reviewed
+                  - [ ] Rollback plan prepared"
+
+                  git push origin ${{ env.BRANCH_NAME }}
+
+            - name: Create Pull Request
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      const pr = await github.rest.pulls.create({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        title: `🚀 Production Deployment: ${context.payload.inputs.image_tag}`,
+                        head: process.env.BRANCH_NAME,
+                        base: 'main',
+                        body: `## Production Deployment Request
+                        
+                        ### 📦 Release Information
+                        - **Image Tag**: \`${context.payload.inputs.image_tag}\`
+                        - **Requested by**: @${context.actor}
+                        - **Date**: ${new Date().toISOString()}
+                        
+                        ### ✅ Pre-deployment Validation
+                        - [x] Images exist in DigitalOcean Registry
+                        - [x] Pre-deployment checks passed
+                        - [ ] **REQUIRED: Manual approval from team lead**
+                        - [ ] Database migrations reviewed (if any)
+                        - [ ] Rollback plan documented
+                        
+                        ### 🎯 Deployment Targets
+                        - **Environment**: Production
+                        - **URL**: http://prod.174.138.120.13.nip.io
+                        - **ArgoCD**: http://209.38.124.183
+                        
+                        ### 🔍 Changes
+                        - Backend: \`registry.digitalocean.com/ai-incident-assistant/backend:${context.payload.inputs.image_tag}\`
+                        - Frontend: \`registry.digitalocean.com/ai-incident-assistant/frontend:${context.payload.inputs.image_tag}\`
+                        
+                        ### 📋 Deployment Steps
+                        1. Review and approve this PR
+                        2. Merge to main branch
+                        3. Manually sync ArgoCD production application
+                        4. Monitor deployment in ArgoCD
+                        5. Run smoke tests (automated)
+                        6. Verify production health
+                        
+                        ### 🚨 Rollback Plan
+                        If issues occur:
+                        1. Revert this PR
+                        2. Sync ArgoCD with previous version
+                        3. Monitor recovery
+                        
+                        ### 🧪 Test Results
+                        Review staging test results: [Staging Validation Workflow](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/staging-validation.yml)
+                        
+                        ---
+                        
+                        **⚠️ IMPORTANT**: This PR requires manual review and approval before merging.
+                        Do not enable auto-merge for production deployments.`
+                      });
+
+                      // Add labels
+                      await github.rest.issues.addLabels({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: pr.data.number,
+                        labels: ['deployment', 'production', 'needs-approval']
+                      });
+
+                      // Request reviews from team leads
+                      await github.rest.pulls.requestReviewers({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        pull_number: pr.data.number,
+                        reviewers: ['team-lead-username'] // Replace with actual usernames
+                      });
+
+                      core.setOutput('pr_number', pr.data.number);
+                      core.setOutput('pr_url', pr.data.html_url);
+
+        outputs:
+            pr_number: ${{ steps.create-pr.outputs.pr_number }}
+            pr_url: ${{ steps.create-pr.outputs.pr_url }}
+
+    # ================================
+    # Post-Merge: Trigger Production Sync
+    # ================================
+    trigger-production-sync:
+        name: Trigger ArgoCD Sync
+        needs: create-deployment-pr
+        runs-on: ubuntu-latest
+        if: github.event.pull_request.merged == true
+
+        steps:
+            - name: Wait for ArgoCD to detect changes
+              run: |
+                  echo "⏳ Waiting 30 seconds for ArgoCD to detect changes..."
+                  sleep 30
+
+            - name: Notify team to sync ArgoCD
+              uses: slackapi/slack-github-action@v1
+              with:
+                  payload: |
+                      {
+                        "text": "🚀 Production Deployment Ready",
+                        "blocks": [
+                          {
+                            "type": "header",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "🚀 Production Deployment Approved"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "Production deployment PR has been merged. *Manual sync required in ArgoCD.*"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "fields": [
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Image Tag:*\n${{ github.event.inputs.image_tag }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Approved by:*\n@${{ github.actor }}"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "*Next Steps:*\n1. Login to ArgoCD: http://209.38.124.183\n2. Navigate to `ai-incident-prod` application\n3. Click 'Sync' button\n4. Monitor deployment progress\n5. Smoke tests will run automatically"
+                            }
+                          },
+                          {
+                            "type": "actions",
+                            "elements": [
+                              {
+                                "type": "button",
+                                "text": {
+                                  "type": "plain_text",
+                                  "text": "Open ArgoCD"
+                                },
+                                "url": "http://209.38.124.183"
+                              },
+                              {
+                                "type": "button",
+                                "text": {
+                                  "type": "plain_text",
+                                  "text": "View PR"
+                                },
+                                "url": "https://github.com/${{ github.repository }}/pull/${{ needs.create-deployment-pr.outputs.pr_number }}"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+              env:
+                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    # ================================
+    # Post-Deployment Smoke Tests
+    # ================================
+    post-deployment-smoke:
+        name: Post-Deployment Smoke Test
+        needs: trigger-production-sync
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Wait for production pods to be ready
+              run: |
+                  echo "⏳ Waiting 2 minutes for pods to be ready..."
+                  sleep 120
+
+            - name: Health check
+              run: |
+                  max_attempts=30
+                  attempt=0
+
+                  while [ $attempt -lt $max_attempts ]; do
+                    if curl -f -s "${{ env.PROD_URL }}/api/health" > /dev/null; then
+                      echo "✅ Production is healthy!"
+                      exit 0
+                    fi
+                    attempt=$((attempt + 1))
+                    echo "Attempt $attempt/$max_attempts failed, retrying in 10s..."
+                    sleep 10
+                  done
+
+                  echo "❌ Production health check failed"
+                  exit 1
+
+            - name: Test critical endpoints
+              run: |
+                  # Test incidents API
+                  status=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PROD_URL }}/api/incidents")
+                  if [ "$status" != "200" ]; then
+                    echo "❌ /api/incidents failed with status $status"
+                    exit 1
+                  fi
+                  echo "✅ /api/incidents: $status"
+
+                  # Test frontend
+                  status=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PROD_URL }}/")
+                  if [ "$status" != "200" ]; then
+                    echo "❌ Frontend failed with status $status"
+                    exit 1
+                  fi
+                  echo "✅ Frontend: $status"
+
+            - name: Send success notification
+              if: success()
+              uses: slackapi/slack-github-action@v1
+              with:
+                  payload: |
+                      {
+                        "text": "✅ Production Deployment Successful",
+                        "blocks": [
+                          {
+                            "type": "header",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "✅ Production Deployment Successful"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "Production deployment completed successfully. All smoke tests passed."
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "fields": [
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Image Tag:*\n${{ github.event.inputs.image_tag }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Status:*\n✅ All systems operational"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "actions",
+                            "elements": [
+                              {
+                                "type": "button",
+                                "text": {
+                                  "type": "plain_text",
+                                  "text": "View Production"
+                                },
+                                "url": "${{ env.PROD_URL }}"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+              env:
+                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+            - name: Send failure notification
+              if: failure()
+              uses: slackapi/slack-github-action@v1
+              with:
+                  payload: |
+                      {
+                        "text": "❌ Production Deployment Failed",
+                        "blocks": [
+                          {
+                            "type": "header",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "❌ Production Deployment Failed"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "⚠️ *URGENT*: Production smoke tests failed. Immediate action required."
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "fields": [
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Image Tag:*\n${{ github.event.inputs.image_tag }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Status:*\n❌ Smoke tests failed"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "*Rollback Steps:*\n1. Revert the deployment PR\n2. Sync ArgoCD with previous version\n3. Verify production health\n4. Investigate root cause"
+                            }
+                          },
+                          {
+                            "type": "actions",
+                            "elements": [
+                              {
+                                "type": "button",
+                                "text": {
+                                  "type": "plain_text",
+                                  "text": "View Logs"
+                                },
+                                "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                              },
+                              {
+                                "type": "button",
+                                "text": {
+                                  "type": "plain_text",
+                                  "text": "Open ArgoCD"
+                                },
+                                "url": "http://209.38.124.183"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+              env:
+                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

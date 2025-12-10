@@ -1,0 +1,299 @@
+name: Staging Validation Tests
+
+on:
+    workflow_dispatch:
+        inputs:
+            test_type:
+                description: "Type of test to run"
+                required: true
+                type: choice
+                options:
+                    - all
+                    - e2e
+                    - load
+                    - smoke
+
+    # Trigger after ArgoCD syncs staging
+    repository_dispatch:
+        types: [staging-deployed]
+
+env:
+    STAGING_URL: http://staging.174.138.120.13.nip.io
+
+jobs:
+    # ================================
+    # Smoke Tests (Quick Health Check)
+    # ================================
+    smoke-test:
+        name: Smoke Test - Staging
+        runs-on: ubuntu-latest
+        if: github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'smoke' || github.event_name == 'repository_dispatch'
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Wait for staging to be ready
+              run: |
+                  echo "⏳ Waiting for staging environment to be ready..."
+                  max_attempts=30
+                  attempt=0
+
+                  while [ $attempt -lt $max_attempts ]; do
+                    if curl -f -s "${{ env.STAGING_URL }}/api/health" > /dev/null; then
+                      echo "✅ Staging is ready!"
+                      exit 0
+                    fi
+                    attempt=$((attempt + 1))
+                    echo "Attempt $attempt/$max_attempts failed, retrying in 10s..."
+                    sleep 10
+                  done
+
+                  echo "❌ Staging failed to become ready"
+                  exit 1
+
+            - name: Test API endpoints
+              run: |
+                  echo "🔍 Testing critical endpoints..."
+
+                  # Test incidents API
+                  response=$(curl -s -w "\n%{http_code}" "${{ env.STAGING_URL }}/api/incidents")
+                  status_code=$(echo "$response" | tail -n 1)
+                  if [ "$status_code" != "200" ]; then
+                    echo "❌ /api/incidents returned $status_code"
+                    exit 1
+                  fi
+                  echo "✅ /api/incidents: $status_code"
+
+                  # Test analytics API
+                  response=$(curl -s -w "\n%{http_code}" "${{ env.STAGING_URL }}/api/analytics/overview")
+                  status_code=$(echo "$response" | tail -n 1)
+                  if [ "$status_code" != "200" ]; then
+                    echo "❌ /api/analytics/overview returned $status_code"
+                    exit 1
+                  fi
+                  echo "✅ /api/analytics/overview: $status_code"
+
+                  # Test frontend
+                  response=$(curl -s -w "\n%{http_code}" "${{ env.STAGING_URL }}/")
+                  status_code=$(echo "$response" | tail -n 1)
+                  if [ "$status_code" != "200" ]; then
+                    echo "❌ Frontend returned $status_code"
+                    exit 1
+                  fi
+                  echo "✅ Frontend: $status_code"
+
+    # ================================
+    # E2E Tests with Playwright
+    # ================================
+    e2e-test:
+        name: E2E Tests - Staging
+        needs: smoke-test
+        runs-on: ubuntu-latest
+        if: |
+            always() && 
+            needs.smoke-test.result == 'success' && 
+            (github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'e2e' || github.event_name == 'repository_dispatch')
+
+        defaults:
+            run:
+                working-directory: ./tests
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+                  cache: "npm"
+                  cache-dependency-path: tests/package-lock.json
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Install Playwright browsers
+              run: npx playwright install --with-deps chromium
+
+            - name: Run E2E tests
+              env:
+                  BASE_URL: ${{ env.STAGING_URL }}
+                  TEST_ENV: staging
+              run: npm run test:e2e
+
+            - name: Upload test results
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: e2e-test-results
+                  path: tests/test-results/
+                  retention-days: 7
+
+            - name: Upload Playwright report
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: playwright-report
+                  path: tests/playwright-report/
+                  retention-days: 7
+
+            - name: Comment PR with test results
+              if: github.event_name == 'pull_request' && always()
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const testResults = fs.readFileSync('tests/test-results/results.json', 'utf8');
+                      const results = JSON.parse(testResults);
+
+                      const comment = `## 🎭 E2E Test Results (Staging)
+
+                      - **Total Tests**: ${results.total}
+                      - **Passed**: ✅ ${results.passed}
+                      - **Failed**: ❌ ${results.failed}
+                      - **Skipped**: ⏭️ ${results.skipped}
+                      - **Duration**: ${results.duration}ms
+
+                      [View Full Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+                      `;
+
+                      github.rest.issues.createComment({
+                        issue_number: context.issue.number,
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        body: comment
+                      });
+
+    # ================================
+    # Load Tests with k6
+    # ================================
+    load-test:
+        name: Load Test - Staging
+        needs: e2e-test
+        runs-on: ubuntu-latest
+        if: |
+            always() && 
+            needs.e2e-test.result == 'success' && 
+            (github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'load')
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup k6
+              run: |
+                  sudo gpg -k
+                  sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+                  echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+                  sudo apt-get update
+                  sudo apt-get install k6
+
+            - name: Run load test - Smoke Test
+              working-directory: ./tests
+              env:
+                  BASE_URL: ${{ env.STAGING_URL }}
+              run: k6 run load-tests/smoke-test.js
+
+            - name: Run load test - Average Load
+              working-directory: ./tests
+              env:
+                  BASE_URL: ${{ env.STAGING_URL }}
+              run: k6 run load-tests/incident-api-load.js
+
+            - name: Upload k6 results
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: k6-results
+                  path: tests/load-tests/results/
+                  retention-days: 7
+
+    # ================================
+    # Test Summary & Notification
+    # ================================
+    test-summary:
+        name: Test Summary
+        needs: [smoke-test, e2e-test, load-test]
+        runs-on: ubuntu-latest
+        if: always()
+
+        steps:
+            - name: Generate test summary
+              run: |
+                  cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+                  ## 🧪 Staging Validation Test Results
+
+                  ### Test Status
+                  | Test Type | Status | Duration |
+                  |-----------|--------|----------|
+                  | Smoke Test | ${{ needs.smoke-test.result == 'success' && '✅ Passed' || '❌ Failed' }} | - |
+                  | E2E Tests | ${{ needs.e2e-test.result == 'success' && '✅ Passed' || needs.e2e-test.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} | - |
+                  | Load Tests | ${{ needs.load-test.result == 'success' && '✅ Passed' || needs.load-test.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} | - |
+
+                  ### Environment
+                  - **Target**: Staging
+                  - **URL**: ${{ env.STAGING_URL }}
+                  - **Triggered by**: ${{ github.actor }}
+
+                  ### Next Steps
+                  ${{ needs.smoke-test.result == 'success' && needs.e2e-test.result == 'success' && needs.load-test.result == 'success' && '✅ All tests passed! Ready for production deployment.' || '⚠️ Some tests failed. Review results before promoting to production.' }}
+
+                  ---
+                  **Workflow**: ${{ github.workflow }}
+                  **Run ID**: ${{ github.run_id }}
+                  EOF
+
+            - name: Send Slack notification
+              if: always()
+              uses: slackapi/slack-github-action@v1
+              with:
+                  payload: |
+                      {
+                        "text": "Staging Validation Results",
+                        "blocks": [
+                          {
+                            "type": "header",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "${{ needs.smoke-test.result == 'success' && needs.e2e-test.result == 'success' && needs.load-test.result == 'success' && '✅ Staging Tests Passed' || '❌ Staging Tests Failed' }}"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "fields": [
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Smoke Test:*\n${{ needs.smoke-test.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*E2E Tests:*\n${{ needs.e2e-test.result == 'success' && '✅ Passed' || needs.e2e-test.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Load Tests:*\n${{ needs.load-test.result == 'success' && '✅ Passed' || needs.load-test.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Environment:*\nStaging"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "actions",
+                            "elements": [
+                              {
+                                "type": "button",
+                                "text": {
+                                  "type": "plain_text",
+                                  "text": "View Results"
+                                },
+                                "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+              env:
+                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
