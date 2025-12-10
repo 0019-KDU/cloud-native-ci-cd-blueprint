@@ -81,6 +81,7 @@ configMapGenerator:
   - NODE_ENV=production
   - LOG_LEVEL=warn
   - CORS_ORIGIN=https://your-domain.com
+  - VITE_API_URL=
   name: backend-config
 
 # Image tags (will be updated by CI/CD pipeline)

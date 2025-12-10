@@ -81,6 +81,7 @@ configMapGenerator:
   - NODE_ENV=staging
   - LOG_LEVEL=info
   - CORS_ORIGIN=*
+  - VITE_API_URL=
   name: backend-config
 
 # Image tags (will be updated by CI/CD pipeline)
