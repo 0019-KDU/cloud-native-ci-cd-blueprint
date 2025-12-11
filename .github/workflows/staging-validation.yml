@@ -119,7 +119,7 @@ jobs:
               env:
                   BASE_URL: ${{ env.STAGING_URL }}
                   TEST_ENV: staging
-              run: npm run test:e2e
+              run: npm test
 
             - name: Upload test results
               if: always()
