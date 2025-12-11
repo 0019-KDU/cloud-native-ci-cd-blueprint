@@ -41,7 +41,7 @@ jobs:
                   doctl registry login
 
                   # Check backend image
-                  if doctl registry repository list-tags ai-incident-assistant/backend | grep -q "${{ github.event.inputs.image_tag }}"; then
+                  if doctl registry repository list-tags backend | grep -q "${{ github.event.inputs.image_tag }}"; then
                     echo "✅ Backend image found: ${{ github.event.inputs.image_tag }}"
                   else
                     echo "❌ Backend image not found: ${{ github.event.inputs.image_tag }}"
@@ -49,7 +49,7 @@ jobs:
                   fi
 
                   # Check frontend image
-                  if doctl registry repository list-tags ai-incident-assistant/frontend | grep -q "${{ github.event.inputs.image_tag }}"; then
+                  if doctl registry repository list-tags frontend | grep -q "${{ github.event.inputs.image_tag }}"; then
                     echo "✅ Frontend image found: ${{ github.event.inputs.image_tag }}"
                   else
                     echo "❌ Frontend image not found: ${{ github.event.inputs.image_tag }}"
