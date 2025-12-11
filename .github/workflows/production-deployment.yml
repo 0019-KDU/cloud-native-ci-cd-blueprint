@@ -29,9 +29,12 @@ jobs:
             - name: Checkout code
               uses: actions/checkout@v4
 
+            - name: Install doctl
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
             - name: Verify image exists in registry
-              env:
-                  DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
               run: |
                   echo "🔍 Verifying images exist..."
 
