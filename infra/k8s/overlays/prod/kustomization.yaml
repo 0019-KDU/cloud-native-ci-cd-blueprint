@@ -24,6 +24,8 @@ replicas:
 # Resource patches for production environment (full resources)
 
 
+
+# Ingress host patch for production
 patches:
 - patch: |-
     - op: replace
@@ -73,8 +75,6 @@ patches:
   target:
     kind: StatefulSet
     name: postgres
-
-# Ingress host patch for production
 - patch: |-
     - op: replace
       path: /spec/rules/0
