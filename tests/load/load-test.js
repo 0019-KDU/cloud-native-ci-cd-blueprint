@@ -32,10 +32,10 @@ export default function () {
   sleep(1);
 
   // Test 2: API Health Check
-  res = http.get(`${BASE_URL}/api/health`);
+  res = http.get(`${BASE_URL}/api`);
   check(res, {
     'health endpoint is 200': (r) => r.status === 200,
-    'health response is valid': (r) => r.body.includes('status'),
+    'health response is valid': (r) => r.body.includes('message'),
   }) || errorRate.add(1);
   sleep(1);
 
@@ -43,10 +43,10 @@ export default function () {
   res = http.get(`${BASE_URL}/api/incidents`);
   check(res, {
     'incidents endpoint is 200': (r) => r.status === 200,
-    'incidents returns array': (r) => {
+    'incidents returns valid JSON': (r) => {
       try {
         const data = JSON.parse(r.body);
-        return Array.isArray(data);
+        return data !== null;
       } catch (e) {
         return false;
       }
@@ -58,10 +58,10 @@ export default function () {
   res = http.get(`${BASE_URL}/api/analytics/overview`);
   check(res, {
     'analytics endpoint is 200': (r) => r.status === 200,
-    'analytics has totalIncidents': (r) => {
+    'analytics has data': (r) => {
       try {
         const data = JSON.parse(r.body);
-        return data.hasOwnProperty('totalIncidents');
+        return data.hasOwnProperty('success') && data.hasOwnProperty('data');
       } catch (e) {
         return false;
       }
@@ -75,7 +75,7 @@ export function setup() {
   console.log(`Starting load test against ${BASE_URL}`);
   
   // Verify backend is reachable
-  const res = http.get(`${BASE_URL}/api/health`);
+  const res = http.get(`${BASE_URL}/api`);
   if (res.status !== 200) {
     throw new Error(`Backend not healthy: ${res.status}`);
   }

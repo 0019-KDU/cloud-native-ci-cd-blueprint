@@ -198,7 +198,7 @@ jobs:
               working-directory: ./tests
               env:
                   BASE_URL: ${{ env.STAGING_URL }}
-              run: k6 run load/incident-api-load.js
+              run: k6 run load/load-test.js
 
             - name: Upload k6 results
               if: always()

@@ -17,7 +17,7 @@ export default function () {
   // Test critical paths only
   const endpoints = [
     { url: '/', name: 'Homepage' },
-    { url: '/api/health', name: 'Health Check' },
+    { url: '/api', name: 'Health Check' },
     { url: '/api/incidents', name: 'Incidents API' },
     { url: '/api/analytics/overview', name: 'Analytics API' },
   ];
