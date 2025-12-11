@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "lint": "echo 'No linter configured for backend (Node.js/Express)' && exit 0",
     "test": "jest --coverage --verbose",
     "test:watch": "jest --watch",
     "test:ci": "jest --coverage --ci --maxWorkers=2"
