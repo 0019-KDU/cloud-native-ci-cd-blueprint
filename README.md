@@ -1,6 +1,6 @@
 # AI Incident & Status Assistant
 
-A **production-grade cloud-native application** for DevOps teams to manage incidents with AI-powered analysis, featuring a complete **GitOps CI/CD pipeline** with multi-stage deployments.
+A **production-grade cloud-native application** for DevOps teams to manage incidents with AI-powered analysis, featuring a complete **GitOps CI/CD pipeline** with multi-stage deployments and enterprise-level security.
 
 ## 📦 Related Repositories
 
