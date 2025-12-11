@@ -82,6 +82,121 @@ jobs:
                     exit 1
                   fi
                   echo "✅ Frontend: $status_code"
+
+    # ================================
+    # OPA Policy Validation
+    # ================================
+    opa-policy-check:
+        name: Security Policy Validation
+        needs: smoke-test
+        runs-on: ubuntu-latest
+        if: |
+            always() && 
+            needs.smoke-test.result == 'success' && 
+            (github.event.inputs.test_type == 'all' || github.event_name == 'repository_dispatch')
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup OPA
+              uses: open-policy-agent/setup-opa@v2
+              with:
+                  version: latest
+
+            - name: Create OPA policies
+              run: |
+                  mkdir -p policies
+
+                  # Create policy for required labels
+                  cat > policies/required_labels.rego <<'EOF'
+                  package kubernetes.admission
+
+                  deny[msg] {
+                      input.kind == "Deployment"
+                      not input.metadata.labels.app
+                      msg := "Deployment must have 'app' label"
+                  }
+
+                  deny[msg] {
+                      input.kind == "Deployment"
+                      not input.metadata.labels.environment
+                      msg := "Deployment must have 'environment' label"
+                  }
+                  EOF
+
+                  # Create policy for resource limits
+                  cat > policies/resource_limits.rego <<'EOF'
+                  package kubernetes.admission
+
+                  deny[msg] {
+                      input.kind == "Deployment"
+                      container := input.spec.template.spec.containers[_]
+                      not container.resources.limits.memory
+                      msg := sprintf("Container '%s' must have memory limits", [container.name])
+                  }
+
+                  deny[msg] {
+                      input.kind == "Deployment"
+                      container := input.spec.template.spec.containers[_]
+                      not container.resources.limits.cpu
+                      msg := sprintf("Container '%s' must have CPU limits", [container.name])
+                  }
+                  EOF
+
+                  # Create policy for image security
+                  cat > policies/image_security.rego <<'EOF'
+                  package kubernetes.admission
+
+                  deny[msg] {
+                      input.kind == "Deployment"
+                      container := input.spec.template.spec.containers[_]
+                      endswith(container.image, ":latest")
+                      msg := sprintf("Container '%s' must not use 'latest' tag", [container.name])
+                  }
+
+                  deny[msg] {
+                      input.kind == "Deployment"
+                      container := input.spec.template.spec.containers[_]
+                      not startswith(container.image, "registry.digitalocean.com")
+                      msg := sprintf("Container '%s' must use trusted registry", [container.name])
+                  }
+                  EOF
+
+            - name: Validate staging manifests
+              run: |
+                  echo "🔐 Validating staging manifests against OPA policies..."
+
+                  # Build staging manifests
+                  kustomize build infra/k8s/overlays/staging > staging-manifests.yaml
+
+                  # Split into individual resources
+                  csplit -s -f resource- staging-manifests.yaml '/^---$/' '{*}'
+
+                  # Test each resource against policies
+                  failed=0
+                  for file in resource-*; do
+                      if [ -s "$file" ]; then
+                          echo "Checking $file..."
+                          result=$(opa eval -d policies/ -i "$file" "data.kubernetes.admission.deny" --format pretty 2>&1) || true
+                          
+                          if echo "$result" | grep -q "\[\]"; then
+                              echo "✅ $file passed all policies"
+                          else
+                              echo "❌ $file failed policy check:"
+                              echo "$result"
+                              failed=1
+                          fi
+                      fi
+                  done
+
+                  if [ $failed -eq 1 ]; then
+                      echo "❌ OPA policy validation failed"
+                      exit 1
+                  fi
+
+                  echo "✅ All staging manifests passed OPA policy validation"
+
     # ================================
     # E2E Tests with Playwright
     # ================================

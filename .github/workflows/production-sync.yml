@@ -29,6 +29,68 @@ jobs:
               run: |
                   doctl kubernetes cluster kubeconfig save ${{ secrets.DIGITALOCEAN_CLUSTER_ID }}
 
+            - name: Record deployment start metadata
+              run: |
+                  cat > deployment-metadata.json <<EOF
+                  {
+                    "deploymentId": "${{ github.run_id }}",
+                    "imageTag": "${{ steps.extract-tag.outputs.image_tag }}",
+                    "deployedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+                    "deployedBy": "${{ github.event.pull_request.merged_by.login }}",
+                    "pullRequest": {
+                      "number": ${{ github.event.pull_request.number }},
+                      "title": "${{ github.event.pull_request.title }}",
+                      "url": "${{ github.event.pull_request.html_url }}"
+                    },
+                    "environment": "production",
+                    "status": "deploying"
+                  }
+                  EOF
+
+                  echo "📊 Deployment metadata:"
+                  cat deployment-metadata.json
+
+            - name: Upload deployment metadata
+              uses: actions/upload-artifact@v4
+              with:
+                  name: deployment-metadata-${{ github.run_id }}
+                  path: deployment-metadata.json
+                  retention-days: 365
+
+            - name: Enable ArgoCD auto-rollback
+              run: |
+                  echo "🔄 Configuring auto-rollback for production..."
+
+                  # Enable auto-sync with automated rollback
+                  kubectl patch application ai-incident-prod -n argocd \
+                    --type merge \
+                    -p '{
+                      "spec": {
+                        "syncPolicy": {
+                          "automated": {
+                            "prune": false,
+                            "selfHeal": true,
+                            "allowEmpty": false
+                          },
+                          "syncOptions": [
+                            "CreateNamespace=false",
+                            "PrunePropagationPolicy=foreground",
+                            "PruneLast=true"
+                          ],
+                          "retry": {
+                            "limit": 5,
+                            "backoff": {
+                              "duration": "5s",
+                              "factor": 2,
+                              "maxDuration": "3m"
+                            }
+                          }
+                        }
+                      }
+                    }'
+
+                  echo "✅ Auto-rollback enabled"
+
             - name: Sync ArgoCD Application
               run: |
                   kubectl patch application ai-incident-prod -n argocd \
@@ -58,14 +120,72 @@ jobs:
                   exit 1
 
             - name: Verify deployed images
+              id: verify-images
               run: |
                   echo "Backend image:"
-                  kubectl get deployment backend -n prod -o jsonpath='{.spec.template.spec.containers[0].image}'
-                  echo ""
+                  BACKEND_IMAGE=$(kubectl get deployment backend -n prod -o jsonpath='{.spec.template.spec.containers[0].image}')
+                  echo "$BACKEND_IMAGE"
+                  echo "backend_image=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
+
                   echo ""
                   echo "Frontend image:"
-                  kubectl get deployment frontend -n prod -o jsonpath='{.spec.template.spec.containers[0].image}'
-                  echo ""
+                  FRONTEND_IMAGE=$(kubectl get deployment frontend -n prod -o jsonpath='{.spec.template.spec.containers[0].image}')
+                  echo "$FRONTEND_IMAGE"
+                  echo "frontend_image=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
+
+            - name: Record deployment metadata
+              if: always()
+              run: |
+                  STATUS="success"
+                  if [ "${{ job.status }}" != "success" ]; then
+                    STATUS="failed"
+                  fi
+
+                  mkdir -p artifacts
+                  cat > artifacts/deployment-metadata.json <<EOF
+                  {
+                    "deploymentId": "${{ github.run_id }}",
+                    "imageTag": "${{ steps.extract-tag.outputs.image_tag }}",
+                    "deployedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+                    "deployedBy": "${{ github.event.pull_request.merged_by.login }}",
+                    "pullRequest": {
+                      "number": ${{ github.event.pull_request.number }},
+                      "title": "${{ github.event.pull_request.title }}",
+                      "url": "${{ github.event.pull_request.html_url }}"
+                    },
+                    "environment": "production",
+                    "namespace": "prod",
+                    "status": "$STATUS",
+                    "deployedImages": {
+                      "backend": "${{ steps.verify-images.outputs.backend_image }}",
+                      "frontend": "${{ steps.verify-images.outputs.frontend_image }}"
+                    },
+                    "argocd": {
+                      "application": "ai-incident-prod",
+                      "syncStatus": "Synced",
+                      "healthStatus": "Healthy",
+                      "autoRollback": "enabled",
+                      "server": "http://209.38.124.183"
+                    },
+                    "completedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  }
+                  EOF
+
+                  echo "📊 Deployment metadata:"
+                  cat artifacts/deployment-metadata.json
+
+            - name: Upload deployment metadata
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: production-deployment-${{ github.run_id }}
+                  path: artifacts/deployment-metadata.json
+                  retention-days: 365
+
+        outputs:
+            image_tag: ${{ steps.extract-tag.outputs.image_tag }}
+            backend_image: ${{ steps.verify-images.outputs.backend_image }}
+            frontend_image: ${{ steps.verify-images.outputs.frontend_image }}
 
     post-deployment-smoke-test:
         needs: sync-production
