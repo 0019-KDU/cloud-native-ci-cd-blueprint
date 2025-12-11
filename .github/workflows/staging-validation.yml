@@ -96,7 +96,7 @@ jobs:
 
         defaults:
             run:
-                working-directory: ./tests
+                working-directory: ./tests/e2e
 
         steps:
             - name: Checkout code
@@ -107,7 +107,7 @@ jobs:
               with:
                   node-version: "20"
                   cache: "npm"
-                  cache-dependency-path: tests/package-lock.json
+                  cache-dependency-path: tests/e2e/package-lock.json
 
             - name: Install dependencies
               run: npm ci
@@ -126,7 +126,7 @@ jobs:
               uses: actions/upload-artifact@v4
               with:
                   name: e2e-test-results
-                  path: tests/test-results/
+                  path: tests/e2e/test-results/
                   retention-days: 7
 
             - name: Upload Playwright report
@@ -134,7 +134,7 @@ jobs:
               uses: actions/upload-artifact@v4
               with:
                   name: playwright-report
-                  path: tests/playwright-report/
+                  path: tests/e2e/playwright-report/
                   retention-days: 7
 
             - name: Comment PR with test results
