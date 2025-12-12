@@ -9,6 +9,7 @@ on:
             - "backend/**"
             - "frontend/**"
             - "infra/k8s/**"
+            - "infra/docker/**"
             - ".github/workflows/ci-dev.yaml"
     pull_request:
         branches:
