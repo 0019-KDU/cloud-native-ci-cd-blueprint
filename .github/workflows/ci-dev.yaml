@@ -1,0 +1,399 @@
+name: CI/CD - Dev Environment
+
+on:
+    push:
+        branches:
+            - main
+            - develop
+        paths:
+            - "backend/**"
+            - "frontend/**"
+            - "infra/k8s/**"
+            - ".github/workflows/ci-dev.yaml"
+    pull_request:
+        branches:
+            - main
+            - develop
+
+env:
+    REGISTRY: registry.digitalocean.com
+    IMAGE_NAME: ai-incident-assistant
+    DEV_NAMESPACE: dev
+
+jobs:
+    # ============================================
+    # JOB 1: Backend Tests & Quality Checks
+    # ============================================
+    backend-test:
+        name: Backend Tests & SonarQube
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0 # Full history for SonarQube
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+                  cache: "npm"
+                  cache-dependency-path: backend/package-lock.json
+
+            - name: Install dependencies
+              working-directory: backend
+              run: npm ci
+
+            - name: Run tests with coverage
+              working-directory: backend
+              run: npm run test:ci
+
+            - name: SonarQube Scan - Backend
+              uses: SonarSource/sonarqube-scan-action@master
+              env:
+                  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+                  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+              with:
+                  projectBaseDir: backend
+                  args: >
+                      -Dsonar.projectKey=ai-incident-backend
+                      -Dsonar.sources=src
+                      -Dsonar.tests=src/__tests__
+                      -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+                      -Dsonar.coverage.exclusions=**/__tests__/**,**/node_modules/**
+
+    # ============================================
+    # JOB 2: Frontend Tests & Quality Checks
+    # ============================================
+    frontend-test:
+        name: Frontend Tests & SonarQube
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+                  cache: "npm"
+                  cache-dependency-path: frontend/package-lock.json
+
+            - name: Install dependencies
+              working-directory: frontend
+              run: npm ci
+
+            - name: Run linter
+              working-directory: frontend
+              run: npm run lint
+
+            - name: Build frontend
+              working-directory: frontend
+              run: npm run build
+
+            - name: SonarQube Scan - Frontend
+              uses: SonarSource/sonarqube-scan-action@master
+              env:
+                  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+                  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+              with:
+                  projectBaseDir: frontend
+                  args: >
+                      -Dsonar.projectKey=ai-incident-frontend
+                      -Dsonar.sources=src
+                      -Dsonar.exclusions=**/node_modules/**,**/dist/**
+
+    # ============================================
+    # JOB 3: Build & Scan Backend Image
+    # ============================================
+    build-backend:
+        name: Build & Scan Backend
+        runs-on: ubuntu-latest
+        needs: [backend-test]
+        if: github.event_name == 'push'
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install doctl
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+            - name: Log in to DigitalOcean Container Registry
+              run: doctl registry login --expiry-seconds 1200
+
+            - name: Build backend image
+              run: |
+                  docker build \
+                    -f infra/docker/backend.Dockerfile \
+                    -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }} \
+                    -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:latest \
+                    .
+
+            - name: Run Trivy vulnerability scanner - Backend
+              uses: aquasecurity/trivy-action@master
+              with:
+                  image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
+                  format: "sarif"
+                  output: "trivy-backend-results.sarif"
+                  severity: "CRITICAL,HIGH"
+
+            - name: Upload Trivy results to GitHub Security
+              uses: github/codeql-action/upload-sarif@v3
+              if: always()
+              with:
+                  sarif_file: "trivy-backend-results.sarif"
+                  category: "trivy-backend"
+
+            - name: Trivy scan report (fail on critical)
+              uses: aquasecurity/trivy-action@master
+              with:
+                  image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
+                  format: "table"
+                  exit-code: "1"
+                  severity: "CRITICAL"
+
+            - name: Push backend image
+              run: |
+                  docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
+                  docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:latest
+
+    # ============================================
+    # JOB 4: Build & Scan Frontend Image
+    # ============================================
+    build-frontend:
+        name: Build & Scan Frontend
+        runs-on: ubuntu-latest
+        needs: [frontend-test]
+        if: github.event_name == 'push'
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install doctl
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+            - name: Log in to DigitalOcean Container Registry
+              run: doctl registry login --expiry-seconds 1200
+
+            - name: Build frontend image
+              run: |
+                  docker build \
+                    -f infra/docker/frontend.Dockerfile \
+                    -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }} \
+                    -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest \
+                    .
+
+            - name: Run Trivy vulnerability scanner - Frontend
+              uses: aquasecurity/trivy-action@master
+              with:
+                  image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
+                  format: "sarif"
+                  output: "trivy-frontend-results.sarif"
+                  severity: "CRITICAL,HIGH"
+
+            - name: Upload Trivy results to GitHub Security
+              uses: github/codeql-action/upload-sarif@v3
+              if: always()
+              with:
+                  sarif_file: "trivy-frontend-results.sarif"
+                  category: "trivy-frontend"
+
+            - name: Trivy scan report (fail on critical)
+              uses: aquasecurity/trivy-action@master
+              with:
+                  image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
+                  format: "table"
+                  exit-code: "1"
+                  severity: "CRITICAL"
+
+            - name: Push frontend image
+              run: |
+                  docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
+                  docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest
+
+    # ============================================
+    # JOB 5: Deploy to Dev Environment
+    # ============================================
+    deploy-dev:
+        name: Deploy to Dev
+        runs-on: ubuntu-latest
+        needs: [build-backend, build-frontend]
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        environment:
+            name: development
+            url: http://dev.174.138.120.13.nip.io
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  fetch-depth: 0
+
+            - name: Configure Git
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            - name: Update image tags in kustomization
+              working-directory: infra/k8s/overlays/dev
+              run: |
+                  # Update image tags using kustomize
+                  kubectl kustomize edit set image \
+                    ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:latest=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }} \
+                    ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
+
+            - name: Commit and push image tag updates
+              run: |
+                  git add infra/k8s/overlays/dev/kustomization.yaml
+                  git commit -m "🚀 Deploy to dev: Update images to ${{ github.sha }}" || echo "No changes to commit"
+                  git push origin main
+
+            - name: Wait for ArgoCD to sync
+              run: |
+                  echo "Waiting 30 seconds for ArgoCD to detect changes..."
+                  sleep 30
+
+            - name: Install doctl
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+            - name: Save DigitalOcean kubeconfig
+              run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
+
+            - name: Wait for rollout to complete
+              run: |
+                  kubectl rollout status deployment/backend -n ${{ env.DEV_NAMESPACE }} --timeout=5m
+                  kubectl rollout status deployment/frontend -n ${{ env.DEV_NAMESPACE }} --timeout=5m
+
+            - name: Verify deployment
+              run: |
+                  echo "✅ Deployment successful!"
+                  kubectl get pods -n ${{ env.DEV_NAMESPACE }}
+                  kubectl get deployments -n ${{ env.DEV_NAMESPACE }}
+
+    # ============================================
+    # JOB 6: Slack Notification
+    # ============================================
+    notify:
+        name: Slack Notification
+        runs-on: ubuntu-latest
+        needs: [deploy-dev]
+        if: always()
+
+        steps:
+            - name: Send Slack notification - Success
+              if: needs.deploy-dev.result == 'success'
+              uses: slackapi/slack-github-action@v1.26.0
+              with:
+                  payload: |
+                      {
+                        "text": "✅ Deployment to DEV successful!",
+                        "blocks": [
+                          {
+                            "type": "header",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "✅ Deployment Successful - Dev Environment"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "fields": [
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Repository:*\n${{ github.repository }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Branch:*\n${{ github.ref_name }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Commit:*\n<${{ github.event.head_commit.url }}|${{ github.sha }}>"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Author:*\n${{ github.actor }}"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "*Message:* ${{ github.event.head_commit.message }}"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "<http://dev.174.138.120.13.nip.io|🔗 View Dev Environment>"
+                            }
+                          }
+                        ]
+                      }
+              env:
+                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+                  SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+            - name: Send Slack notification - Failure
+              if: needs.deploy-dev.result == 'failure'
+              uses: slackapi/slack-github-action@v1.26.0
+              with:
+                  payload: |
+                      {
+                        "text": "❌ Deployment to DEV failed!",
+                        "blocks": [
+                          {
+                            "type": "header",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "❌ Deployment Failed - Dev Environment"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "fields": [
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Repository:*\n${{ github.repository }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Branch:*\n${{ github.ref_name }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Commit:*\n<${{ github.event.head_commit.url }}|${{ github.sha }}>"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Author:*\n${{ github.actor }}"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔗 View Failed Run>"
+                            }
+                          }
+                        ]
+                      }
+              env:
+                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+                  SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

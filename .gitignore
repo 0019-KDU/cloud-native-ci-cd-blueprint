@@ -1,10 +1,4 @@
-﻿# Terraform
-infra/terraform/*.tfstate*
-infra/terraform/.terraform/
-infra/terraform/.terraform.lock.hcl
-infra/terraform/kubeconfig-*.yaml
-
-# Environment files with secrets
+﻿# Environment files with secrets
 backend/.env
 # Block staging and production secrets (contain real credentials)
 infra/k8s/overlays/staging/*-secret.yaml
@@ -13,3 +7,6 @@ infra/k8s/overlays/production/*-secret.yaml
 
 # Node
 node_modules/
+
+# Argo Rollouts kubectl plugin
+kubectl-argo-rollouts.exe
