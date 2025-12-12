@@ -4,8 +4,8 @@
 # ==============================================
 
 # Stage 1: Dependencies
-# Use Alpine for smaller image size
-FROM node:20-alpine AS dependencies
+# Use Alpine 3.20 for security patches
+FROM node:20-alpine3.20 AS dependencies
 
 # Set working directory
 WORKDIR /app
@@ -20,7 +20,7 @@ RUN npm install --omit=dev --legacy-peer-deps && \
     npm cache clean --force
 
 # Stage 2: Build (if needed for transpilation)
-FROM node:20-alpine AS builder
+FROM node:20-alpine3.20 AS builder
 
 WORKDIR /app
 
@@ -35,7 +35,7 @@ COPY backend/ ./
 # RUN npm run build
 
 # Stage 3: Production Runtime
-FROM node:20-alpine AS production
+FROM node:20-alpine3.20 AS production
 
 # Install dumb-init to handle signals properly
 RUN apk add --no-cache dumb-init
