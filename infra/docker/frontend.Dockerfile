@@ -4,7 +4,7 @@
 # ==============================================
 
 # Stage 1: Dependencies
-FROM node:20-alpine AS dependencies
+FROM node:20-alpine3.20 AS dependencies
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ RUN npm ci --legacy-peer-deps && \
     npm cache clean --force
 
 # Stage 2: Build
-FROM node:20-alpine AS builder
+FROM node:20-alpine3.20 AS builder
 
 WORKDIR /app
 
@@ -31,7 +31,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 3: Production Runtime with Nginx
-FROM nginx:1.25-alpine AS production
+FROM nginx:1.27-alpine AS production
 
 # Install curl for health checks
 RUN apk add --no-cache curl
