@@ -1,0 +1,8 @@
+# Trivy Vulnerability Ignore List
+# Use this file to suppress false positives or known issues
+
+# libxml2 CVEs in Alpine base image - waiting for upstream Alpine package update
+# These are in the OS layer (nginx:alpine base), not our application code
+# Track: https://gitlab.alpinelinux.org/alpine/aports/-/issues
+CVE-2025-49794
+CVE-2025-49796
