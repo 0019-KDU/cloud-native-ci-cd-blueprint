@@ -17,6 +17,11 @@ on:
             - main
             - develop
 
+permissions:
+    contents: write
+    security-events: write
+    pull-requests: read
+
 env:
     REGISTRY: registry.digitalocean.com
     IMAGE_NAME: ai-incident-assistant
