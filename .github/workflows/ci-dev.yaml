@@ -10,6 +10,7 @@ on:
             - "frontend/**"
             - "infra/k8s/**"
             - "infra/docker/**"
+            - ".trivyignore"
             - ".github/workflows/ci-dev.yaml"
     pull_request:
         branches:
