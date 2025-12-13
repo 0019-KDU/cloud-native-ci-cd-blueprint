@@ -248,8 +248,8 @@ jobs:
                   git config user.email "github-actions[bot]@users.noreply.github.com"
 
             - name: Update image tags in kustomization
-              working-directory: infra/k8s/overlays/dev
               run: |
+                  cd infra/k8s/overlays/dev
                   # Update image tags using kustomize
                   kubectl kustomize edit set image \
                     ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }} \
