@@ -252,8 +252,8 @@ jobs:
               run: |
                   # Update image tags using kustomize
                   kubectl kustomize edit set image \
-                    ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:latest=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }} \
-                    ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
+                    ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }} \
+                    ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
 
             - name: Commit and push image tag updates
               run: |
