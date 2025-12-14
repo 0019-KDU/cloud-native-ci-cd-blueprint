@@ -20,7 +20,7 @@ on:
 permissions:
     contents: write
     security-events: write
-    pull-requests: read
+    pull-requests: write
 
 env:
     REGISTRY: registry.digitalocean.com
@@ -252,23 +252,100 @@ jobs:
                   git config user.name "github-actions[bot]"
                   git config user.email "github-actions[bot]@users.noreply.github.com"
 
+            - name: Create deployment branch
+              run: |
+                  # Create unique branch name
+                  BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
+                  git checkout -b $BRANCH_NAME
+
             - name: Update image tags in kustomization
               run: |
-                  # Update backend image tag
+                  # Update image tags
                   sed -i "s|newTag: .*|newTag: ${{ github.sha }}|g" infra/k8s/overlays/dev/kustomization.yaml
 
                   # Verify changes
+                  echo "📝 Updated kustomization.yaml:"
                   cat infra/k8s/overlays/dev/kustomization.yaml | grep -A 2 "images:"
 
-            - name: Commit and push image tag updates
+            - name: Commit changes to bot branch
               run: |
                   git add infra/k8s/overlays/dev/kustomization.yaml
-                  git commit -m "🚀 Deploy to dev: Update images to ${{ github.sha }}" || echo "No changes to commit"
-                  git push origin main
+                  git commit -m "🚀 Deploy to dev: Update images to ${{ github.sha }}"
+
+            - name: Push bot branch
+              run: |
+                  BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
+                  git push origin $BRANCH_NAME
+
+            - name: Create Pull Request
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
+
+                  # Create PR
+                  gh pr create \
+                    --title "🚀 Deploy to Dev: ${{ github.sha }}" \
+                    --body "**Automated deployment to dev environment**
+
+                  📦 **Changes:**
+                  - Backend image: \`${{ github.sha }}\`
+                  - Frontend image: \`${{ github.sha }}\`
+
+                  🔗 **Commit:** ${{ github.event.head_commit.url }}
+                  👤 **Author:** ${{ github.actor }}
+                  💬 **Message:** ${{ github.event.head_commit.message }}
+
+                  ---
+                  *This PR was automatically created by the CI/CD pipeline.*
+                  *Once merged, ArgoCD will sync the changes to the dev environment.*" \
+                    --base main \
+                    --head $BRANCH_NAME \
+                    --label "deployment" \
+                    --label "automated" \
+                    --label "dev-environment"
+
+            - name: Auto-merge PR
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
+
+                  # Get PR number
+                  PR_NUMBER=$(gh pr list --head $BRANCH_NAME --json number --jq '.[0].number')
+
+                  echo "📋 PR #$PR_NUMBER created"
+
+                  # Enable auto-merge (will merge once CI checks pass)
+                  gh pr merge $PR_NUMBER --auto --squash --delete-branch
+
+                  echo "✅ Auto-merge enabled - PR will merge after checks pass"
+
+            - name: Wait for PR to merge
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
+                  PR_NUMBER=$(gh pr list --head $BRANCH_NAME --json number --jq '.[0].number')
+
+                  echo "⏳ Waiting for PR #$PR_NUMBER to merge..."
+
+                  # Wait up to 5 minutes for PR to merge
+                  for i in {1..30}; do
+                    PR_STATE=$(gh pr view $PR_NUMBER --json state --jq '.state')
+                    
+                    if [ "$PR_STATE" == "MERGED" ]; then
+                      echo "✅ PR #$PR_NUMBER merged successfully!"
+                      break
+                    fi
+                    
+                    echo "⏳ Waiting... (attempt $i/30)"
+                    sleep 10
+                  done
 
             - name: Wait for ArgoCD to sync
               run: |
-                  echo "Waiting 30 seconds for ArgoCD to detect changes..."
+                  echo "⏳ Waiting 30 seconds for ArgoCD to detect changes..."
                   sleep 30
 
             - name: Install doctl
