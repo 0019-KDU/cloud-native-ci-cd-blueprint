@@ -121,7 +121,6 @@ jobs:
         name: Build & Scan Backend
         runs-on: ubuntu-latest
         needs: [backend-test]
-        if: github.event_name == 'push'
 
         steps:
             - name: Checkout code
@@ -167,6 +166,7 @@ jobs:
                   severity: "CRITICAL"
 
             - name: Push backend image
+              if: github.event_name == 'push'
               run: |
                   docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
                   docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:latest
@@ -178,7 +178,6 @@ jobs:
         name: Build & Scan Frontend
         runs-on: ubuntu-latest
         needs: [frontend-test]
-        if: github.event_name == 'push'
 
         steps:
             - name: Checkout code
@@ -224,6 +223,7 @@ jobs:
                   severity: "CRITICAL"
 
             - name: Push frontend image
+              if: github.event_name == 'push'
               run: |
                   docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
                   docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest
@@ -283,7 +283,7 @@ jobs:
               run: |
                   BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
 
-                  # Create PR
+                  # Create PR (without labels to avoid errors if they don't exist)
                   gh pr create \
                     --title "🚀 Deploy to Dev: ${{ github.sha }}" \
                     --body "**Automated deployment to dev environment**
@@ -300,10 +300,7 @@ jobs:
                   *This PR was automatically created by the CI/CD pipeline.*
                   *Once merged, ArgoCD will sync the changes to the dev environment.*" \
                     --base main \
-                    --head $BRANCH_NAME \
-                    --label "deployment" \
-                    --label "automated" \
-                    --label "dev-environment"
+                    --head $BRANCH_NAME
 
             - name: Auto-merge PR
               env:
