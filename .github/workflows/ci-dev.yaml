@@ -262,7 +262,7 @@ jobs:
               run: |
                   # Update image tags
                   sed -i "s|newTag: .*|newTag: ${{ github.sha }}|g" infra/k8s/overlays/dev/kustomization.yaml
-                  
+
                   # Verify changes
                   echo "📝 Updated kustomization.yaml:"
                   cat infra/k8s/overlays/dev/kustomization.yaml | grep -A 2 "images:"
@@ -282,20 +282,20 @@ jobs:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
-                  
+
                   # Create PR
                   gh pr create \
                     --title "🚀 Deploy to Dev: ${{ github.sha }}" \
                     --body "**Automated deployment to dev environment**
-                  
+
                   📦 **Changes:**
                   - Backend image: \`${{ github.sha }}\`
                   - Frontend image: \`${{ github.sha }}\`
-                  
+
                   🔗 **Commit:** ${{ github.event.head_commit.url }}
                   👤 **Author:** ${{ github.actor }}
                   💬 **Message:** ${{ github.event.head_commit.message }}
-                  
+
                   ---
                   *This PR was automatically created by the CI/CD pipeline.*
                   *Once merged, ArgoCD will sync the changes to the dev environment.*" \
@@ -310,15 +310,15 @@ jobs:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
-                  
+
                   # Get PR number
                   PR_NUMBER=$(gh pr list --head $BRANCH_NAME --json number --jq '.[0].number')
-                  
+
                   echo "📋 PR #$PR_NUMBER created"
-                  
+
                   # Enable auto-merge (will merge once CI checks pass)
                   gh pr merge $PR_NUMBER --auto --squash --delete-branch
-                  
+
                   echo "✅ Auto-merge enabled - PR will merge after checks pass"
 
             - name: Wait for PR to merge
@@ -327,9 +327,9 @@ jobs:
               run: |
                   BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
                   PR_NUMBER=$(gh pr list --head $BRANCH_NAME --json number --jq '.[0].number')
-                  
+
                   echo "⏳ Waiting for PR #$PR_NUMBER to merge..."
-                  
+
                   # Wait up to 5 minutes for PR to merge
                   for i in {1..30}; do
                     PR_STATE=$(gh pr view $PR_NUMBER --json state --jq '.state')
