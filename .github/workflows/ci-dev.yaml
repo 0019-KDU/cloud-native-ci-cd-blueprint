@@ -298,50 +298,32 @@ jobs:
 
                   ---
                   *This PR was automatically created by the CI/CD pipeline.*
-                  *Once merged, ArgoCD will sync the changes to the dev environment.*" \
+                  *Once merged, ArgoCD will sync the changes to the dev environment.*
+
+                  ---
+
+                  💡 **First time?** Click \"Enable auto-merge\" → Squash and merge
+                  📌 GitHub will remember this and auto-merge future PRs after checks pass!" \
                     --base main \
                     --head $BRANCH_NAME
 
-            - name: Auto-merge PR
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
-
-                  # Get PR number
-                  PR_NUMBER=$(gh pr list --head $BRANCH_NAME --json number --jq '.[0].number')
-
-                  echo "📋 PR #$PR_NUMBER created"
-
-                  # Enable auto-merge (will merge once CI checks pass)
-                  gh pr merge $PR_NUMBER --auto --squash --delete-branch
-
-                  echo "✅ Auto-merge enabled - PR will merge after checks pass"
-
-            - name: Wait for PR to merge
+            - name: PR Created Successfully
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
                   PR_NUMBER=$(gh pr list --head $BRANCH_NAME --json number --jq '.[0].number')
+                  PR_URL=$(gh pr view $PR_NUMBER --json url --jq '.url')
 
-                  echo "⏳ Waiting for PR #$PR_NUMBER to merge..."
-
-                  # Wait up to 5 minutes for PR to merge
-                  for i in {1..30}; do
-                    PR_STATE=$(gh pr view $PR_NUMBER --json state --jq '.state')
-                    
-                    if [ "$PR_STATE" == "MERGED" ]; then
-                      echo "✅ PR #$PR_NUMBER merged successfully!"
-                      break
-                    fi
-                    
-                    echo "⏳ Waiting... (attempt $i/30)"
-                    sleep 10
-                  done
-
-            - name: Wait for ArgoCD to sync
-              run: |
+                  echo "✅ Deployment PR created successfully!"
+                  echo "📋 PR #$PR_NUMBER: $PR_URL"
+                  echo ""
+                  echo "🔍 Required checks will run on this PR:"
+                  echo "   - build-backend"
+                  echo "   - build-frontend"
+                  echo ""
+                  echo "⚡ If auto-merge is enabled, PR will merge automatically after checks pass"
+                  echo "💡 If not enabled yet, go to PR and click 'Enable auto-merge' (one-time setup)"
                   echo "⏳ Waiting 30 seconds for ArgoCD to detect changes..."
                   sleep 30
 
