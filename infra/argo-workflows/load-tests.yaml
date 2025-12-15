@@ -6,6 +6,7 @@ metadata:
         app: ai-incident-assistant
         test-type: load
 spec:
+    serviceAccountName: argo-workflow
     entrypoint: load-test-suite
     
     # Input parameters
