@@ -115,9 +115,9 @@ spec:
         - name: run-smoke-test
           script:
               image: grafana/k6:latest
-              command: [bash]
+              command: [sh]
               source: |
-                  #!/bin/bash
+                  #!/bin/sh
                   set -e
                   
                   echo "🔥 Running Smoke Test..."
@@ -142,9 +142,9 @@ spec:
         - name: run-load-test
           script:
               image: grafana/k6:latest
-              command: [bash]
+              command: [sh]
               source: |
-                  #!/bin/bash
+                  #!/bin/sh
                   set -e
                   
                   echo "📊 Running Load Test..."
