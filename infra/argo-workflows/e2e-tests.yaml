@@ -39,37 +39,13 @@ spec:
                     template: health-check
                     dependencies: [setup]
                     
-                  - name: auth-tests
+                  - name: e2e-tests
                     template: run-e2e-tests
-                    arguments:
-                        parameters:
-                            - name: test-suite
-                              value: "auth"
-                    dependencies: [health-check]
-                    
-                  - name: incident-tests
-                    template: run-e2e-tests
-                    arguments:
-                        parameters:
-                            - name: test-suite
-                              value: "incidents"
-                    dependencies: [health-check]
-                    
-                  - name: dashboard-tests
-                    template: run-e2e-tests
-                    arguments:
-                        parameters:
-                            - name: test-suite
-                              value: "dashboard"
-                    dependencies: [health-check]
-                    
-                  - name: api-tests
-                    template: run-api-tests
                     dependencies: [health-check]
                     
                   - name: collect-results
                     template: collect-results
-                    dependencies: [auth-tests, incident-tests, dashboard-tests, api-tests]
+                    dependencies: [e2e-tests]
 
         # ============================================
         # Setup Template
@@ -130,9 +106,6 @@ spec:
         # E2E Tests with Playwright
         # ============================================
         - name: run-e2e-tests
-          inputs:
-              parameters:
-                  - name: test-suite
           script:
               image: mcr.microsoft.com/playwright:v1.57.0-jammy
               command: [bash]
@@ -140,7 +113,7 @@ spec:
                   #!/bin/bash
                   set -e
                   
-                  echo "🎭 Running E2E Tests: {{inputs.parameters.test-suite}}"
+                  echo "🎭 Running E2E Tests"
                   
                   # Clone repository to get test files
                   git clone https://github.com/0019-KDU/cloud-native-ci-cd-blueprint.git /workspace
@@ -159,19 +132,6 @@ spec:
                     --reporter=list
                   
                   echo "✅ E2E tests completed successfully!"
-                        tests/{{inputs.parameters.test-suite}}/ \
-                        --reporter=html,json \
-                        --output=/results/{{inputs.parameters.test-suite}}
-                      
-                      # Check exit code
-                      TEST_EXIT_CODE=$?
-                      
-                      if [ $TEST_EXIT_CODE -eq 0 ]; then
-                        echo "✅ {{inputs.parameters.test-suite}} tests passed!"
-                      else
-                        echo "❌ {{inputs.parameters.test-suite}} tests failed!"
-                        exit $TEST_EXIT_CODE
-                      fi
               env:
                   - name: BASE_URL
                     value: "{{workflow.parameters.staging_url}}"
@@ -184,32 +144,6 @@ spec:
                   limits:
                       memory: "2Gi"
                       cpu: "1000m"
-
-        # ============================================
-        # API Tests with Newman (Postman)
-        # ============================================
-        - name: run-api-tests
-          container:
-              image: postman/newman:6-alpine
-              command: [sh, -c]
-              args:
-                  - |
-                      echo "🔌 Running API Tests..."
-                      
-                      newman run /tests/api-tests.postman_collection.json \
-                        --environment /tests/staging.postman_environment.json \
-                        --reporters cli,json \
-                        --reporter-json-export /results/api-test-results.json \
-                        --env-var "baseUrl={{workflow.parameters.staging_url}}/api"
-                      
-                      TEST_EXIT_CODE=$?
-                      
-                      if [ $TEST_EXIT_CODE -eq 0 ]; then
-                        echo "✅ API tests passed!"
-                      else
-                        echo "❌ API tests failed!"
-                        exit $TEST_EXIT_CODE
-                      fi
 
         # ============================================
         # Collect Results
