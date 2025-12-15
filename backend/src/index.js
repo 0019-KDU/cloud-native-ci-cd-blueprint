@@ -64,18 +64,21 @@ app.use((req, res, next) => {
 
 // Health check endpoint - useful for monitoring
 app.get('/health', (req, res) => {
+  logger.info('Health check endpoint accessed');
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    environment: config.nodeEnv,
   });
 });
 
 // API root endpoint
 app.get('/api', (req, res) => {
+  logger.info('API root endpoint accessed');
   res.json({
     message: 'AI Incident & Status Assistant API',
-    version: '1.0.0',
+    version: '1.1.0',
     endpoints: {
       incidents: '/api/incidents',
       health: '/health',
