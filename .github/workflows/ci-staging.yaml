@@ -248,7 +248,7 @@ jobs:
             - name: Wait for E2E Tests
               run: |
                   echo "⏳ Waiting for E2E tests to complete..."
-                  argo wait ${{ steps.submit-e2e.outputs.workflow_name }} -n argo --timeout 20m
+                  argo wait ${{ steps.submit-e2e.outputs.workflow_name }} -n argo
 
             - name: Get E2E Results
               if: always()
@@ -310,7 +310,7 @@ jobs:
             - name: Wait for Load Tests
               run: |
                   echo "⏳ Waiting for load tests to complete..."
-                  argo wait ${{ steps.submit-load.outputs.workflow_name }} -n argo --timeout 30m
+                  argo wait ${{ steps.submit-load.outputs.workflow_name }} -n argo
 
             - name: Get Load Test Results
               if: always()
