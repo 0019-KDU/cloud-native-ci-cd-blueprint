@@ -177,38 +177,4 @@ spec:
                       echo "✅ All load tests completed successfully!"
                       echo "Results have been collected and analyzed."
                       echo "================================"
-                      fi
-              volumeMounts:
-                  - name: test-code
-                    mountPath: /tests
-                  - name: results
-                    mountPath: /results
-          volumes:
-              - name: test-code
-                configMap:
-                    name: api-test-collection
-              - name: results
-                emptyDir: {}
-          outputs:
-              artifacts:
-                  - name: api-results
-                    path: /results
-
-        # ============================================
-        # Collect Results
-        # ============================================
-        - name: collect-results
-          container:
-              image: alpine:3.18
-              command: [sh, -c]
-              args:
-                  - |
-                      echo "📊 E2E Test Results Summary"
-                      echo "================================"
-                      echo "Image Tag: {{workflow.parameters.image_tag}}"
-                      echo "Staging URL: {{workflow.parameters.staging_url}}"
-                      echo "================================"
-                      echo ""
-                      echo "✅ All E2E tests completed successfully!"
-                      echo ""
                       echo "Test artifacts have been saved."
