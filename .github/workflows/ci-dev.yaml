@@ -37,38 +37,10 @@ env:
 
 jobs:
     # ============================================
-    # PRE-CHECK: Prevent bot loops
-    # ============================================
-    check-skip:
-        runs-on: ubuntu-latest
-        outputs:
-            should_skip: ${{ steps.check.outputs.should_skip }}
-        steps:
-            - name: Check if should skip
-              id: check
-              run: |
-                  COMMIT_MSG="${{ github.event.head_commit.message }}"
-                  ACTOR="${{ github.actor }}"
-
-                  # Skip if this is a bot deployment commit
-                  if [[ "$COMMIT_MSG" == *"Deploy to dev:"* ]] || \
-                     [[ "$COMMIT_MSG" == *"[skip ci]"* ]] || \
-                     [[ "$COMMIT_MSG" == *"[ci skip]"* ]] || \
-                     [[ "$ACTOR" == "github-actions[bot]" && "$COMMIT_MSG" == *"Update images"* ]]; then
-                    echo "should_skip=true" >> $GITHUB_OUTPUT
-                    echo "⏭️ Skipping pipeline - bot/deployment commit detected"
-                  else
-                    echo "should_skip=false" >> $GITHUB_OUTPUT
-                    echo "✅ Running pipeline - regular commit"
-                  fi
-
-    # ============================================
     # JOB 1: Backend Tests & Quality Checks
     # ============================================
     backend-test:
         name: Backend Tests & SonarQube
-        needs: check-skip
-        if: needs.check-skip.outputs.should_skip != 'true'
         runs-on: ubuntu-latest
 
         steps:
@@ -111,8 +83,6 @@ jobs:
     # ============================================
     frontend-test:
         name: Frontend Tests & SonarQube
-        needs: check-skip
-        if: needs.check-skip.outputs.should_skip != 'true'
         runs-on: ubuntu-latest
 
         steps:

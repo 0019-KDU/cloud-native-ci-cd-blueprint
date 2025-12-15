@@ -1,0 +1,431 @@
+name: CI/CD - Staging Environment
+
+on:
+    # Manual trigger with inputs
+    workflow_dispatch:
+        inputs:
+            image_tag:
+                description: "Image tag to deploy (leave empty for latest from dev)"
+                required: false
+                type: string
+            skip_tests:
+                description: "Skip E2E and Load tests"
+                required: false
+                type: boolean
+                default: false
+            run_load_test:
+                description: "Run load tests"
+                required: false
+                type: boolean
+                default: true
+            run_e2e_test:
+                description: "Run E2E tests"
+                required: false
+                type: boolean
+                default: true
+
+permissions:
+    contents: write
+    pull-requests: write
+    actions: write
+
+env:
+    REGISTRY: registry.digitalocean.com
+    IMAGE_NAME: ai-incident-assistant
+    STAGING_NAMESPACE: staging
+    ARGO_WORKFLOWS_URL: ${{ secrets.ARGO_WORKFLOWS_URL }}
+
+jobs:
+    # ============================================
+    # JOB 1: Determine Image Tag
+    # ============================================
+    prepare:
+        name: Prepare Deployment
+        runs-on: ubuntu-latest
+        outputs:
+            image_tag: ${{ steps.get-tag.outputs.image_tag }}
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Get image tag
+              id: get-tag
+              run: |
+                  if [ -n "${{ inputs.image_tag }}" ]; then
+                    # Use provided tag
+                    echo "image_tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+                    echo "📦 Using provided image tag: ${{ inputs.image_tag }}"
+                  else
+                    # Get current tag from dev environment
+                    DEV_TAG=$(grep "newTag:" infra/k8s/overlays/dev/kustomization.yaml | head -1 | sed 's/.*newTag:\s*//; s/"//g; s/^[[:space:]]*//; s/[[:space:]]*$//')
+                    echo "image_tag=$DEV_TAG" >> $GITHUB_OUTPUT
+                    echo "📦 Using dev image tag: $DEV_TAG"
+                  fi
+
+    # ============================================
+    # JOB 2: Update Staging Manifests
+    # ============================================
+    update-staging-manifests:
+        name: Update Staging Manifests
+        runs-on: ubuntu-latest
+        needs: [prepare]
+        outputs:
+            pr_number: ${{ steps.create-pr.outputs.pr_number }}
+            pr_url: ${{ steps.create-pr.outputs.pr_url }}
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  fetch-depth: 0
+
+            - name: Configure Git
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            - name: Create staging deployment branch
+              run: |
+                  BRANCH_NAME="deploy/staging-${{ needs.prepare.outputs.image_tag }}"
+                  git checkout -b $BRANCH_NAME
+                  echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+            - name: Update staging kustomization
+              run: |
+                  cd infra/k8s/overlays/staging
+                  sed -i "s|newTag:.*|newTag: \"${{ needs.prepare.outputs.image_tag }}\"|g" kustomization.yaml
+
+                  echo "📝 Updated staging kustomization.yaml:"
+                  cat kustomization.yaml
+
+            - name: Commit and push
+              run: |
+                  git add infra/k8s/overlays/staging/kustomization.yaml
+                  git commit -m "🚀 Deploy to staging: ${{ needs.prepare.outputs.image_tag }} [skip ci]"
+                  git push origin ${{ env.BRANCH_NAME }}
+
+            - name: Create Pull Request
+              id: create-pr
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  PR_URL=$(gh pr create \
+                    --title "🎭 Deploy to Staging: ${{ needs.prepare.outputs.image_tag }}" \
+                    --body "## Staging Deployment
+
+                  ### 📦 Image Tag
+                  \`${{ needs.prepare.outputs.image_tag }}\`
+
+                  ### 🧪 Tests to Run
+                  - E2E Tests: ${{ inputs.run_e2e_test && '✅ Yes' || '⏭️ Skipped' }}
+                  - Load Tests: ${{ inputs.run_load_test && '✅ Yes' || '⏭️ Skipped' }}
+
+                  ### ⚡ What happens next?
+                  1. This PR merges after approval
+                  2. ArgoCD syncs to staging (manual sync required)
+                  3. Argo Workflow runs E2E and Load tests
+                  4. Slack notification on completion
+
+                  ---
+                  *🤖 Triggered by: @${{ github.actor }}*" \
+                    --base main \
+                    --head ${{ env.BRANCH_NAME }})
+
+                  PR_NUMBER=$(gh pr list --head ${{ env.BRANCH_NAME }} --json number --jq '.[0].number')
+
+                  echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+                  echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+
+    # ============================================
+    # JOB 3: Merge and Sync
+    # ============================================
+    merge-and-sync:
+        name: Merge and Trigger Sync
+        runs-on: ubuntu-latest
+        needs: [prepare, update-staging-manifests]
+        environment:
+            name: staging
+            url: http://staging.174.138.120.13.nip.io
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Auto-merge staging PR
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  # Enable auto-merge
+                  gh pr merge ${{ needs.update-staging-manifests.outputs.pr_number }} --auto --squash
+
+                  echo "✅ Auto-merge enabled for PR #${{ needs.update-staging-manifests.outputs.pr_number }}"
+
+            - name: Install doctl
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+            - name: Save kubeconfig
+              run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
+
+            - name: Wait for PR merge
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  echo "⏳ Waiting for PR to merge..."
+                  for i in {1..30}; do
+                    STATE=$(gh pr view ${{ needs.update-staging-manifests.outputs.pr_number }} --json state --jq '.state')
+                    if [ "$STATE" = "MERGED" ]; then
+                      echo "✅ PR merged!"
+                      break
+                    fi
+                    echo "Waiting... ($i/30)"
+                    sleep 10
+                  done
+
+            - name: Trigger ArgoCD Sync (Manual)
+              run: |
+                  echo "🔄 Triggering ArgoCD sync for staging..."
+
+                  # Option 1: Using ArgoCD CLI
+                  # argocd app sync ai-incident-staging --auth-token ${{ secrets.ARGOCD_TOKEN }}
+
+                  # Option 2: Using kubectl to trigger sync
+                  kubectl patch application ai-incident-staging -n argocd \
+                    --type merge \
+                    -p '{"operation": {"initiatedBy": {"username": "github-actions"}, "sync": {"revision": "HEAD"}}}' \
+                    || echo "Manual sync may be required"
+
+            - name: Wait for rollout
+              run: |
+                  echo "⏳ Waiting for staging deployment..."
+                  kubectl rollout status deployment/backend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
+                  kubectl rollout status deployment/frontend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
+                  echo "✅ Staging deployment complete!"
+
+    # ============================================
+    # JOB 4: Run E2E Tests via Argo Workflow
+    # ============================================
+    e2e-tests:
+        name: E2E Tests (Argo Workflow)
+        runs-on: ubuntu-latest
+        needs: [prepare, merge-and-sync]
+        if: ${{ inputs.run_e2e_test != false }}
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install doctl
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+            - name: Save kubeconfig
+              run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
+
+            - name: Install Argo CLI
+              run: |
+                  curl -sLO https://github.com/argoproj/argo-workflows/releases/download/v3.5.4/argo-linux-amd64.gz
+                  gunzip argo-linux-amd64.gz
+                  chmod +x argo-linux-amd64
+                  sudo mv argo-linux-amd64 /usr/local/bin/argo
+
+            - name: Submit E2E Test Workflow
+              id: submit-e2e
+              run: |
+                  WORKFLOW_NAME=$(argo submit infra/argo-workflows/e2e-tests.yaml \
+                    -n argo \
+                    --parameter image_tag=${{ needs.prepare.outputs.image_tag }} \
+                    --parameter staging_url=http://staging.174.138.120.13.nip.io \
+                    -o name)
+
+                  echo "workflow_name=$WORKFLOW_NAME" >> $GITHUB_OUTPUT
+                  echo "🧪 Submitted E2E workflow: $WORKFLOW_NAME"
+
+            - name: Wait for E2E Tests
+              run: |
+                  echo "⏳ Waiting for E2E tests to complete..."
+                  argo wait ${{ steps.submit-e2e.outputs.workflow_name }} -n argo --timeout 20m
+
+            - name: Get E2E Results
+              if: always()
+              run: |
+                  argo get ${{ steps.submit-e2e.outputs.workflow_name }} -n argo
+
+                  # Check status
+                  STATUS=$(argo get ${{ steps.submit-e2e.outputs.workflow_name }} -n argo -o json | jq -r '.status.phase')
+                  if [ "$STATUS" != "Succeeded" ]; then
+                    echo "❌ E2E tests failed!"
+                    argo logs ${{ steps.submit-e2e.outputs.workflow_name }} -n argo
+                    exit 1
+                  fi
+
+                  echo "✅ E2E tests passed!"
+
+    # ============================================
+    # JOB 5: Run Load Tests via Argo Workflow
+    # ============================================
+    load-tests:
+        name: Load Tests (Argo Workflow)
+        runs-on: ubuntu-latest
+        needs: [prepare, e2e-tests]
+        if: ${{ inputs.run_load_test != false && always() && needs.e2e-tests.result == 'success' }}
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install doctl
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+            - name: Save kubeconfig
+              run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
+
+            - name: Install Argo CLI
+              run: |
+                  curl -sLO https://github.com/argoproj/argo-workflows/releases/download/v3.5.4/argo-linux-amd64.gz
+                  gunzip argo-linux-amd64.gz
+                  chmod +x argo-linux-amd64
+                  sudo mv argo-linux-amd64 /usr/local/bin/argo
+
+            - name: Submit Load Test Workflow
+              id: submit-load
+              run: |
+                  WORKFLOW_NAME=$(argo submit infra/argo-workflows/load-tests.yaml \
+                    -n argo \
+                    --parameter image_tag=${{ needs.prepare.outputs.image_tag }} \
+                    --parameter staging_url=http://staging.174.138.120.13.nip.io \
+                    --parameter duration=5m \
+                    --parameter users=50 \
+                    -o name)
+
+                  echo "workflow_name=$WORKFLOW_NAME" >> $GITHUB_OUTPUT
+                  echo "📊 Submitted Load Test workflow: $WORKFLOW_NAME"
+
+            - name: Wait for Load Tests
+              run: |
+                  echo "⏳ Waiting for load tests to complete..."
+                  argo wait ${{ steps.submit-load.outputs.workflow_name }} -n argo --timeout 30m
+
+            - name: Get Load Test Results
+              if: always()
+              run: |
+                  argo get ${{ steps.submit-load.outputs.workflow_name }} -n argo
+
+                  STATUS=$(argo get ${{ steps.submit-load.outputs.workflow_name }} -n argo -o json | jq -r '.status.phase')
+                  if [ "$STATUS" != "Succeeded" ]; then
+                    echo "❌ Load tests failed!"
+                    argo logs ${{ steps.submit-load.outputs.workflow_name }} -n argo
+                    exit 1
+                  fi
+
+                  echo "✅ Load tests passed!"
+
+    # ============================================
+    # JOB 6: Notify Results
+    # ============================================
+    notify:
+        name: Notify Results
+        runs-on: ubuntu-latest
+        needs: [prepare, merge-and-sync, e2e-tests, load-tests]
+        if: always()
+
+        steps:
+            - name: Send Slack - Success
+              if: ${{ needs.e2e-tests.result == 'success' && (needs.load-tests.result == 'success' || needs.load-tests.result == 'skipped') }}
+              uses: slackapi/slack-github-action@v1.26.0
+              with:
+                  payload: |
+                      {
+                        "text": "✅ Staging deployment successful!",
+                        "blocks": [
+                          {
+                            "type": "header",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "✅ Staging Deployment Complete"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "fields": [
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Image Tag:*\n`${{ needs.prepare.outputs.image_tag }}`"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Triggered by:*\n${{ github.actor }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*E2E Tests:*\n${{ needs.e2e-tests.result == 'success' && '✅ Passed' || '⏭️ Skipped' }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Load Tests:*\n${{ needs.load-tests.result == 'success' && '✅ Passed' || '⏭️ Skipped' }}"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "🎭 <http://staging.174.138.120.13.nip.io|View Staging Environment>\n\n*Ready for production deployment!*"
+                            }
+                          }
+                        ]
+                      }
+              env:
+                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+                  SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+            - name: Send Slack - Failure
+              if: ${{ needs.e2e-tests.result == 'failure' || needs.load-tests.result == 'failure' }}
+              uses: slackapi/slack-github-action@v1.26.0
+              with:
+                  payload: |
+                      {
+                        "text": "❌ Staging deployment failed!",
+                        "blocks": [
+                          {
+                            "type": "header",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "❌ Staging Deployment Failed"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "fields": [
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Image Tag:*\n`${{ needs.prepare.outputs.image_tag }}`"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*E2E Tests:*\n${{ needs.e2e-tests.result }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Load Tests:*\n${{ needs.load-tests.result }}"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔗 View Failed Run>"
+                            }
+                          }
+                        ]
+                      }
+              env:
+                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+                  SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

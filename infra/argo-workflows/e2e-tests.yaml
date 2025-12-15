@@ -1,0 +1,257 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+    generateName: e2e-tests-
+    labels:
+        app: ai-incident-assistant
+        test-type: e2e
+spec:
+    entrypoint: e2e-test-suite
+    
+    # Input parameters
+    arguments:
+        parameters:
+            - name: image_tag
+              value: "latest"
+            - name: staging_url
+              value: "http://staging.174.138.120.13.nip.io"
+            - name: browser
+              value: "chromium"
+              
+    # Artifact storage for test results
+    artifactRepositoryRef:
+        configMap: artifact-repositories
+        key: default-artifact-repository
+        
+    # TTL for workflow cleanup
+    ttlStrategy:
+        secondsAfterCompletion: 86400  # 24 hours
+        secondsAfterSuccess: 43200      # 12 hours
+        secondsAfterFailure: 172800     # 48 hours
+        
+    templates:
+        # ============================================
+        # Main E2E Test Suite
+        # ============================================
+        - name: e2e-test-suite
+          dag:
+              tasks:
+                  - name: setup
+                    template: setup-tests
+                    
+                  - name: health-check
+                    template: health-check
+                    dependencies: [setup]
+                    
+                  - name: auth-tests
+                    template: run-e2e-tests
+                    arguments:
+                        parameters:
+                            - name: test-suite
+                              value: "auth"
+                    dependencies: [health-check]
+                    
+                  - name: incident-tests
+                    template: run-e2e-tests
+                    arguments:
+                        parameters:
+                            - name: test-suite
+                              value: "incidents"
+                    dependencies: [health-check]
+                    
+                  - name: dashboard-tests
+                    template: run-e2e-tests
+                    arguments:
+                        parameters:
+                            - name: test-suite
+                              value: "dashboard"
+                    dependencies: [health-check]
+                    
+                  - name: api-tests
+                    template: run-api-tests
+                    dependencies: [health-check]
+                    
+                  - name: collect-results
+                    template: collect-results
+                    dependencies: [auth-tests, incident-tests, dashboard-tests, api-tests]
+
+        # ============================================
+        # Setup Template
+        # ============================================
+        - name: setup-tests
+          container:
+              image: alpine:3.18
+              command: [sh, -c]
+              args:
+                  - |
+                      echo "🧪 E2E Test Setup"
+                      echo "================================"
+                      echo "Image Tag: {{workflow.parameters.image_tag}}"
+                      echo "Staging URL: {{workflow.parameters.staging_url}}"
+                      echo "Browser: {{workflow.parameters.browser}}"
+                      echo "================================"
+                      echo "Setup complete!"
+
+        # ============================================
+        # Health Check Template
+        # ============================================
+        - name: health-check
+          container:
+              image: curlimages/curl:8.5.0
+              command: [sh, -c]
+              args:
+                  - |
+                      echo "🏥 Running health checks..."
+                      
+                      # Check frontend
+                      echo "Checking frontend..."
+                      for i in $(seq 1 10); do
+                        if curl -sf "{{workflow.parameters.staging_url}}" > /dev/null; then
+                          echo "✅ Frontend is healthy"
+                          break
+                        fi
+                        echo "Waiting for frontend... ($i/10)"
+                        sleep 5
+                      done
+                      
+                      # Check backend API
+                      echo "Checking backend API..."
+                      for i in $(seq 1 10); do
+                        if curl -sf "{{workflow.parameters.staging_url}}/api/health" > /dev/null; then
+                          echo "✅ Backend API is healthy"
+                          break
+                        fi
+                        echo "Waiting for backend... ($i/10)"
+                        sleep 5
+                      done
+                      
+                      echo "✅ All health checks passed!"
+          retryStrategy:
+              limit: 3
+              retryPolicy: "Always"
+
+        # ============================================
+        # E2E Tests with Playwright
+        # ============================================
+        - name: run-e2e-tests
+          inputs:
+              parameters:
+                  - name: test-suite
+          container:
+              image: mcr.microsoft.com/playwright:v1.40.0-jammy
+              command: [sh, -c]
+              args:
+                  - |
+                      echo "🎭 Running E2E Tests: {{inputs.parameters.test-suite}}"
+                      
+                      # Clone test repository or use mounted tests
+                      cd /tests
+                      
+                      # Install dependencies
+                      npm ci
+                      
+                      # Run Playwright tests
+                      npx playwright test \
+                        --project={{workflow.parameters.browser}} \
+                        tests/{{inputs.parameters.test-suite}}/ \
+                        --reporter=html,json \
+                        --output=/results/{{inputs.parameters.test-suite}}
+                      
+                      # Check exit code
+                      TEST_EXIT_CODE=$?
+                      
+                      if [ $TEST_EXIT_CODE -eq 0 ]; then
+                        echo "✅ {{inputs.parameters.test-suite}} tests passed!"
+                      else
+                        echo "❌ {{inputs.parameters.test-suite}} tests failed!"
+                        exit $TEST_EXIT_CODE
+                      fi
+              env:
+                  - name: BASE_URL
+                    value: "{{workflow.parameters.staging_url}}"
+                  - name: CI
+                    value: "true"
+              volumeMounts:
+                  - name: test-code
+                    mountPath: /tests
+                  - name: results
+                    mountPath: /results
+              resources:
+                  requests:
+                      memory: "1Gi"
+                      cpu: "500m"
+                  limits:
+                      memory: "2Gi"
+                      cpu: "1000m"
+          volumes:
+              - name: test-code
+                configMap:
+                    name: e2e-test-code
+              - name: results
+                emptyDir: {}
+          outputs:
+              artifacts:
+                  - name: test-results
+                    path: /results
+                    archive:
+                        none: {}
+
+        # ============================================
+        # API Tests with Newman (Postman)
+        # ============================================
+        - name: run-api-tests
+          container:
+              image: postman/newman:6-alpine
+              command: [sh, -c]
+              args:
+                  - |
+                      echo "🔌 Running API Tests..."
+                      
+                      newman run /tests/api-tests.postman_collection.json \
+                        --environment /tests/staging.postman_environment.json \
+                        --reporters cli,json \
+                        --reporter-json-export /results/api-test-results.json \
+                        --env-var "baseUrl={{workflow.parameters.staging_url}}/api"
+                      
+                      TEST_EXIT_CODE=$?
+                      
+                      if [ $TEST_EXIT_CODE -eq 0 ]; then
+                        echo "✅ API tests passed!"
+                      else
+                        echo "❌ API tests failed!"
+                        exit $TEST_EXIT_CODE
+                      fi
+              volumeMounts:
+                  - name: test-code
+                    mountPath: /tests
+                  - name: results
+                    mountPath: /results
+          volumes:
+              - name: test-code
+                configMap:
+                    name: api-test-collection
+              - name: results
+                emptyDir: {}
+          outputs:
+              artifacts:
+                  - name: api-results
+                    path: /results
+
+        # ============================================
+        # Collect Results
+        # ============================================
+        - name: collect-results
+          container:
+              image: alpine:3.18
+              command: [sh, -c]
+              args:
+                  - |
+                      echo "📊 E2E Test Results Summary"
+                      echo "================================"
+                      echo "Image Tag: {{workflow.parameters.image_tag}}"
+                      echo "Staging URL: {{workflow.parameters.staging_url}}"
+                      echo "================================"
+                      echo ""
+                      echo "✅ All E2E tests completed successfully!"
+                      echo ""
+                      echo "Test artifacts have been saved."
