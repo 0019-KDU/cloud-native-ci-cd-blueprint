@@ -134,7 +134,7 @@ spec:
               parameters:
                   - name: test-suite
           script:
-              image: mcr.microsoft.com/playwright:v1.40.0-jammy
+              image: mcr.microsoft.com/playwright:v1.57.0-jammy
               command: [bash]
               source: |
                   #!/bin/bash
