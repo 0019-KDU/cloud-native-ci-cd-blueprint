@@ -8,14 +8,22 @@ on:
         paths:
             - "backend/**"
             - "frontend/**"
-            - "infra/k8s/**"
             - "infra/docker/**"
             - ".trivyignore"
             - ".github/workflows/ci-dev.yaml"
+            # Explicitly exclude kustomization files
+            - "!infra/k8s/overlays/**/kustomization.yaml"
+            - "!infra/k8s/base/kustomization.yaml"
     pull_request:
         branches:
             - main
             - develop
+        paths:
+            - "backend/**"
+            - "frontend/**"
+            - "infra/docker/**"
+            - "infra/k8s/**"
+            - ".github/workflows/ci-dev.yaml"
 
 permissions:
     contents: write
@@ -29,17 +37,45 @@ env:
 
 jobs:
     # ============================================
+    # PRE-CHECK: Prevent bot loops
+    # ============================================
+    check-skip:
+        runs-on: ubuntu-latest
+        outputs:
+            should_skip: ${{ steps.check.outputs.should_skip }}
+        steps:
+            - name: Check if should skip
+              id: check
+              run: |
+                  COMMIT_MSG="${{ github.event.head_commit.message }}"
+                  ACTOR="${{ github.actor }}"
+
+                  # Skip if this is a bot deployment commit
+                  if [[ "$COMMIT_MSG" == *"Deploy to dev:"* ]] || \
+                     [[ "$COMMIT_MSG" == *"[skip ci]"* ]] || \
+                     [[ "$COMMIT_MSG" == *"[ci skip]"* ]] || \
+                     [[ "$ACTOR" == "github-actions[bot]" && "$COMMIT_MSG" == *"Update images"* ]]; then
+                    echo "should_skip=true" >> $GITHUB_OUTPUT
+                    echo "⏭️ Skipping pipeline - bot/deployment commit detected"
+                  else
+                    echo "should_skip=false" >> $GITHUB_OUTPUT
+                    echo "✅ Running pipeline - regular commit"
+                  fi
+
+    # ============================================
     # JOB 1: Backend Tests & Quality Checks
     # ============================================
     backend-test:
         name: Backend Tests & SonarQube
+        needs: check-skip
+        if: needs.check-skip.outputs.should_skip != 'true'
         runs-on: ubuntu-latest
 
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
               with:
-                  fetch-depth: 0 # Full history for SonarQube
+                  fetch-depth: 0
 
             - name: Setup Node.js
               uses: actions/setup-node@v4
@@ -75,6 +111,8 @@ jobs:
     # ============================================
     frontend-test:
         name: Frontend Tests & SonarQube
+        needs: check-skip
+        if: needs.check-skip.outputs.should_skip != 'true'
         runs-on: ubuntu-latest
 
         steps:
@@ -121,6 +159,8 @@ jobs:
         name: Build & Scan Backend
         runs-on: ubuntu-latest
         needs: [backend-test]
+        outputs:
+            image_tag: ${{ github.sha }}
 
         steps:
             - name: Checkout code
@@ -178,6 +218,8 @@ jobs:
         name: Build & Scan Frontend
         runs-on: ubuntu-latest
         needs: [frontend-test]
+        outputs:
+            image_tag: ${{ github.sha }}
 
         steps:
             - name: Checkout code
@@ -229,16 +271,16 @@ jobs:
                   docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest
 
     # ============================================
-    # JOB 5: Deploy to Dev Environment
+    # JOB 5: Update GitOps Manifests (Create PR)
     # ============================================
-    deploy-dev:
-        name: Deploy to Dev
+    update-manifests:
+        name: Update GitOps Manifests
         runs-on: ubuntu-latest
         needs: [build-backend, build-frontend]
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        environment:
-            name: development
-            url: http://dev.174.138.120.13.nip.io
+        outputs:
+            pr_number: ${{ steps.create-pr.outputs.pr_number }}
+            pr_url: ${{ steps.create-pr.outputs.pr_url }}
 
         steps:
             - name: Checkout code
@@ -254,121 +296,99 @@ jobs:
 
             - name: Create deployment branch
               run: |
-                  # Create unique branch name
-                  BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
+                  BRANCH_NAME="deploy/dev-${{ github.sha }}"
                   git checkout -b $BRANCH_NAME
+                  echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
             - name: Update image tags in kustomization
               run: |
-                  # Update image tags
-                  sed -i "s|newTag: .*|newTag: ${{ github.sha }}|g" infra/k8s/overlays/dev/kustomization.yaml
+                  cd infra/k8s/overlays/dev
 
-                  # Verify changes
+                  # Update using kustomize edit (cleaner approach)
+                  # Or use sed for direct replacement
+                  sed -i "s|newTag: .*|newTag: \"${{ github.sha }}\"|g" kustomization.yaml
+
                   echo "📝 Updated kustomization.yaml:"
-                  cat infra/k8s/overlays/dev/kustomization.yaml | grep -A 2 "images:"
+                  cat kustomization.yaml
 
-            - name: Commit changes to bot branch
+            - name: Commit and push changes
               run: |
                   git add infra/k8s/overlays/dev/kustomization.yaml
-                  git commit -m "🚀 Deploy to dev: Update images to ${{ github.sha }}"
-
-            - name: Push bot branch
-              run: |
-                  BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
-                  git push origin $BRANCH_NAME
+                  git commit -m "🚀 Deploy to dev: Update images to ${{ github.sha }} [skip ci]"
+                  git push origin ${{ env.BRANCH_NAME }}
 
             - name: Create Pull Request
+              id: create-pr
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
-
-                  # Create PR (without labels to avoid errors if they don't exist)
-                  gh pr create \
+                  # Create PR
+                  PR_URL=$(gh pr create \
                     --title "🚀 Deploy to Dev: ${{ github.sha }}" \
-                    --body "**Automated deployment to dev environment**
+                    --body "## Automated Deployment to Dev Environment
 
-                  📦 **Changes:**
-                  - Backend image: \`${{ github.sha }}\`
-                  - Frontend image: \`${{ github.sha }}\`
+                  ### 📦 Image Updates
+                  | Component | New Tag |
+                  |-----------|---------|
+                  | Backend | \`${{ github.sha }}\` |
+                  | Frontend | \`${{ github.sha }}\` |
 
-                  🔗 **Commit:** ${{ github.event.head_commit.url }}
-                  👤 **Author:** ${{ github.actor }}
-                  💬 **Message:** ${{ github.event.head_commit.message }}
+                  ### 🔗 References
+                  - **Source Commit:** [${{ github.sha }}](${{ github.event.head_commit.url }})
+                  - **Author:** @${{ github.actor }}
+                  - **Message:** ${{ github.event.head_commit.message }}
 
                   ---
-                  *This PR was automatically created by the CI/CD pipeline.*
-                  *Once merged, ArgoCD will sync the changes to the dev environment.*
+
+                  ### ⚡ What happens next?
+                  1. This PR will be auto-merged after checks pass
+                  2. ArgoCD will detect the change and sync to dev cluster
+                  3. You'll receive a Slack notification when deployment completes
 
                   ---
-
-                  💡 **First time?** Click \"Enable auto-merge\" → Squash and merge
-                  📌 GitHub will remember this and auto-merge future PRs after checks pass!" \
+                  *🤖 This PR was automatically created by CI/CD pipeline*" \
                     --base main \
-                    --head $BRANCH_NAME
+                    --head ${{ env.BRANCH_NAME }})
 
-            - name: PR Created Successfully
+                  PR_NUMBER=$(gh pr list --head ${{ env.BRANCH_NAME }} --json number --jq '.[0].number')
+
+                  echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+                  echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+                  echo "✅ Created PR #$PR_NUMBER: $PR_URL"
+
+            - name: Enable Auto-Merge
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  BRANCH_NAME="bot/deploy-dev-${{ github.sha }}"
-                  PR_NUMBER=$(gh pr list --head $BRANCH_NAME --json number --jq '.[0].number')
-                  PR_URL=$(gh pr view $PR_NUMBER --json url --jq '.url')
+                  PR_NUMBER=${{ steps.create-pr.outputs.pr_number }}
 
-                  echo "✅ Deployment PR created successfully!"
-                  echo "📋 PR #$PR_NUMBER: $PR_URL"
-                  echo ""
-                  echo "🔍 Required checks will run on this PR:"
-                  echo "   - build-backend"
-                  echo "   - build-frontend"
-                  echo ""
-                  echo "⚡ If auto-merge is enabled, PR will merge automatically after checks pass"
-                  echo "💡 If not enabled yet, go to PR and click 'Enable auto-merge' (one-time setup)"
-                  echo "⏳ Waiting 30 seconds for ArgoCD to detect changes..."
-                  sleep 30
+                  # Enable auto-merge (squash)
+                  gh pr merge $PR_NUMBER --auto --squash || echo "Auto-merge may need to be enabled in repo settings"
 
-            - name: Install doctl
-              uses: digitalocean/action-doctl@v2
-              with:
-                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-            - name: Save DigitalOcean kubeconfig
-              run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
-
-            - name: Wait for rollout to complete
-              run: |
-                  kubectl rollout status deployment/backend -n ${{ env.DEV_NAMESPACE }} --timeout=5m
-                  kubectl rollout status deployment/frontend -n ${{ env.DEV_NAMESPACE }} --timeout=5m
-
-            - name: Verify deployment
-              run: |
-                  echo "✅ Deployment successful!"
-                  kubectl get pods -n ${{ env.DEV_NAMESPACE }}
-                  kubectl get deployments -n ${{ env.DEV_NAMESPACE }}
+                  echo "✅ Auto-merge enabled for PR #$PR_NUMBER"
 
     # ============================================
-    # JOB 6: Slack Notification
+    # JOB 6: Notify on PR Creation
     # ============================================
-    notify:
-        name: Slack Notification
+    notify-pr-created:
+        name: Notify PR Created
         runs-on: ubuntu-latest
-        needs: [deploy-dev]
-        if: always()
+        needs: [update-manifests]
+        if: needs.update-manifests.result == 'success'
 
         steps:
-            - name: Send Slack notification - Success
-              if: needs.deploy-dev.result == 'success'
+            - name: Send Slack notification - PR Created
               uses: slackapi/slack-github-action@v1.26.0
               with:
                   payload: |
                       {
-                        "text": "✅ Deployment to DEV successful!",
+                        "text": "🔄 Deployment PR created for DEV",
                         "blocks": [
                           {
                             "type": "header",
                             "text": {
                               "type": "plain_text",
-                              "text": "✅ Deployment Successful - Dev Environment"
+                              "text": "🔄 Deployment PR Created - Dev Environment"
                             }
                           },
                           {
@@ -376,35 +396,21 @@ jobs:
                             "fields": [
                               {
                                 "type": "mrkdwn",
-                                "text": "*Repository:*\n${{ github.repository }}"
+                                "text": "*PR:*\n<${{ needs.update-manifests.outputs.pr_url }}|#${{ needs.update-manifests.outputs.pr_number }}>"
                               },
                               {
                                 "type": "mrkdwn",
-                                "text": "*Branch:*\n${{ github.ref_name }}"
-                              },
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Commit:*\n<${{ github.event.head_commit.url }}|${{ github.sha }}>"
+                                "text": "*Image Tag:*\n`${{ github.sha }}`"
                               },
                               {
                                 "type": "mrkdwn",
                                 "text": "*Author:*\n${{ github.actor }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Status:*\nAwaiting auto-merge"
                               }
                             ]
-                          },
-                          {
-                            "type": "section",
-                            "text": {
-                              "type": "mrkdwn",
-                              "text": "*Message:* ${{ github.event.head_commit.message }}"
-                            }
-                          },
-                          {
-                            "type": "section",
-                            "text": {
-                              "type": "mrkdwn",
-                              "text": "<http://dev.174.138.120.13.nip.io|🔗 View Dev Environment>"
-                            }
                           }
                         ]
                       }
@@ -412,19 +418,35 @@ jobs:
                   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
                   SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
+    # ============================================
+    # JOB 7: Notify on Failure
+    # ============================================
+    notify-failure:
+        name: Notify Failure
+        runs-on: ubuntu-latest
+        needs:
+            [
+                backend-test,
+                frontend-test,
+                build-backend,
+                build-frontend,
+                update-manifests,
+            ]
+        if: failure()
+
+        steps:
             - name: Send Slack notification - Failure
-              if: needs.deploy-dev.result == 'failure'
               uses: slackapi/slack-github-action@v1.26.0
               with:
                   payload: |
                       {
-                        "text": "❌ Deployment to DEV failed!",
+                        "text": "❌ CI Pipeline failed!",
                         "blocks": [
                           {
                             "type": "header",
                             "text": {
                               "type": "plain_text",
-                              "text": "❌ Deployment Failed - Dev Environment"
+                              "text": "❌ CI Pipeline Failed"
                             }
                           },
                           {
@@ -440,7 +462,7 @@ jobs:
                               },
                               {
                                 "type": "mrkdwn",
-                                "text": "*Commit:*\n<${{ github.event.head_commit.url }}|${{ github.sha }}>"
+                                "text": "*Commit:*\n`${{ github.sha }}`"
                               },
                               {
                                 "type": "mrkdwn",
