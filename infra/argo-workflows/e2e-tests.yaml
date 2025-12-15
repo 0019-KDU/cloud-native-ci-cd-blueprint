@@ -6,6 +6,7 @@ metadata:
         app: ai-incident-assistant
         test-type: e2e
 spec:
+    serviceAccountName: argo-workflow
     entrypoint: e2e-test-suite
     
     # Input parameters
