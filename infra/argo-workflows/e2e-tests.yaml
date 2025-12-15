@@ -177,11 +177,6 @@ spec:
                     value: "{{workflow.parameters.staging_url}}"
                   - name: CI
                     value: "true"
-              volumeMounts:
-                  - name: test-code
-                    mountPath: /tests
-                  - name: results
-                    mountPath: /results
               resources:
                   requests:
                       memory: "1Gi"
@@ -189,18 +184,6 @@ spec:
                   limits:
                       memory: "2Gi"
                       cpu: "1000m"
-          volumes:
-              - name: test-code
-                configMap:
-                    name: e2e-test-code
-              - name: results
-                emptyDir: {}
-          outputs:
-              artifacts:
-                  - name: test-results
-                    path: /results
-                    archive:
-                        none: {}
 
         # ============================================
         # API Tests with Newman (Postman)
@@ -227,21 +210,6 @@ spec:
                         echo "❌ API tests failed!"
                         exit $TEST_EXIT_CODE
                       fi
-              volumeMounts:
-                  - name: test-code
-                    mountPath: /tests
-                  - name: results
-                    mountPath: /results
-          volumes:
-              - name: test-code
-                configMap:
-                    name: api-test-collection
-              - name: results
-                emptyDir: {}
-          outputs:
-              artifacts:
-                  - name: api-results
-                    path: /results
 
         # ============================================
         # Collect Results
