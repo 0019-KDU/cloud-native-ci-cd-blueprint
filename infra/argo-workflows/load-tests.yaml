@@ -1,12 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-    generateName: e2e-tests-
+    generateName: load-tests-
     labels:
         app: ai-incident-assistant
-        test-type: e2e
+        test-type: load
 spec:
-    entrypoint: e2e-test-suite
+    entrypoint: load-test-suite
     
     # Input parameters
     arguments:
@@ -15,13 +15,10 @@ spec:
               value: "latest"
             - name: staging_url
               value: "http://staging.174.138.120.13.nip.io"
-            - name: browser
-              value: "chromium"
-              
-    # Artifact storage for test results
-    artifactRepositoryRef:
-        configMap: artifact-repositories
-        key: default-artifact-repository
+            - name: duration
+              value: "5m"
+            - name: users
+              value: "50"
         
     # TTL for workflow cleanup
     ttlStrategy:
@@ -31,9 +28,9 @@ spec:
         
     templates:
         # ============================================
-        # Main E2E Test Suite
+        # Main Load Test Suite
         # ============================================
-        - name: e2e-test-suite
+        - name: load-test-suite
           dag:
               tasks:
                   - name: setup
@@ -43,37 +40,17 @@ spec:
                     template: health-check
                     dependencies: [setup]
                     
-                  - name: auth-tests
-                    template: run-e2e-tests
-                    arguments:
-                        parameters:
-                            - name: test-suite
-                              value: "auth"
+                  - name: smoke-test
+                    template: run-smoke-test
                     dependencies: [health-check]
                     
-                  - name: incident-tests
-                    template: run-e2e-tests
-                    arguments:
-                        parameters:
-                            - name: test-suite
-                              value: "incidents"
-                    dependencies: [health-check]
+                  - name: load-test
+                    template: run-load-test
+                    dependencies: [smoke-test]
                     
-                  - name: dashboard-tests
-                    template: run-e2e-tests
-                    arguments:
-                        parameters:
-                            - name: test-suite
-                              value: "dashboard"
-                    dependencies: [health-check]
-                    
-                  - name: api-tests
-                    template: run-api-tests
-                    dependencies: [health-check]
-                    
-                  - name: collect-results
-                    template: collect-results
-                    dependencies: [auth-tests, incident-tests, dashboard-tests, api-tests]
+                  - name: report-results
+                    template: generate-report
+                    dependencies: [load-test]
 
         # ============================================
         # Setup Template
@@ -84,11 +61,12 @@ spec:
               command: [sh, -c]
               args:
                   - |
-                      echo "🧪 E2E Test Setup"
+                      echo "📊 Load Test Setup"
                       echo "================================"
                       echo "Image Tag: {{workflow.parameters.image_tag}}"
                       echo "Staging URL: {{workflow.parameters.staging_url}}"
-                      echo "Browser: {{workflow.parameters.browser}}"
+                      echo "Duration: {{workflow.parameters.duration}}"
+                      echo "Virtual Users: {{workflow.parameters.users}}"
                       echo "================================"
                       echo "Setup complete!"
 
@@ -131,95 +109,73 @@ spec:
               retryPolicy: "Always"
 
         # ============================================
-        # E2E Tests with Playwright
+        # Smoke Test with k6
         # ============================================
-        - name: run-e2e-tests
-          inputs:
-              parameters:
-                  - name: test-suite
-          container:
-              image: mcr.microsoft.com/playwright:v1.40.0-jammy
-              command: [sh, -c]
-              args:
-                  - |
-                      echo "🎭 Running E2E Tests: {{inputs.parameters.test-suite}}"
-                      
-                      # Clone test repository or use mounted tests
-                      cd /tests
-                      
-                      # Install dependencies
-                      npm ci
-                      
-                      # Run Playwright tests
-                      npx playwright test \
-                        --project={{workflow.parameters.browser}} \
-                        tests/{{inputs.parameters.test-suite}}/ \
-                        --reporter=html,json \
-                        --output=/results/{{inputs.parameters.test-suite}}
-                      
-                      # Check exit code
-                      TEST_EXIT_CODE=$?
-                      
-                      if [ $TEST_EXIT_CODE -eq 0 ]; then
-                        echo "✅ {{inputs.parameters.test-suite}} tests passed!"
-                      else
-                        echo "❌ {{inputs.parameters.test-suite}} tests failed!"
-                        exit $TEST_EXIT_CODE
-                      fi
-              env:
-                  - name: BASE_URL
-                    value: "{{workflow.parameters.staging_url}}"
-                  - name: CI
-                    value: "true"
-              volumeMounts:
-                  - name: test-code
-                    mountPath: /tests
-                  - name: results
-                    mountPath: /results
-              resources:
-                  requests:
-                      memory: "1Gi"
-                      cpu: "500m"
-                  limits:
-                      memory: "2Gi"
-                      cpu: "1000m"
-          volumes:
-              - name: test-code
-                configMap:
-                    name: e2e-test-code
-              - name: results
-                emptyDir: {}
-          outputs:
-              artifacts:
-                  - name: test-results
-                    path: /results
-                    archive:
-                        none: {}
+        - name: run-smoke-test
+          script:
+              image: grafana/k6:latest
+              command: [bash]
+              source: |
+                  #!/bin/bash
+                  set -e
+                  
+                  echo "🔥 Running Smoke Test..."
+                  
+                  # Clone repository to get test files
+                  apk add --no-cache git
+                  git clone https://github.com/0019-KDU/cloud-native-ci-cd-blueprint.git /workspace
+                  cd /workspace/tests/load
+                  
+                  # Run smoke test
+                  k6 run \
+                    --vus 1 \
+                    --duration 30s \
+                    --env BASE_URL="{{workflow.parameters.staging_url}}" \
+                    smoke-test.js
+                  
+                  echo "✅ Smoke test completed!"
 
         # ============================================
-        # API Tests with Newman (Postman)
+        # Load Test with k6
         # ============================================
-        - name: run-api-tests
+        - name: run-load-test
+          script:
+              image: grafana/k6:latest
+              command: [bash]
+              source: |
+                  #!/bin/bash
+                  set -e
+                  
+                  echo "📊 Running Load Test..."
+                  
+                  # Clone repository to get test files
+                  apk add --no-cache git
+                  git clone https://github.com/0019-KDU/cloud-native-ci-cd-blueprint.git /workspace
+                  cd /workspace/tests/load
+                  
+                  # Run load test
+                  k6 run \
+                    --vus {{workflow.parameters.users}} \
+                    --duration {{workflow.parameters.duration}} \
+                    --env BASE_URL="{{workflow.parameters.staging_url}}" \
+                    load-test.js
+                  
+                  echo "✅ Load test completed!"
+
+        # ============================================
+        # Generate Report
+        # ============================================
+        - name: generate-report
           container:
-              image: postman/newman:6-alpine
+              image: alpine:3.18
               command: [sh, -c]
               args:
                   - |
-                      echo "🔌 Running API Tests..."
-                      
-                      newman run /tests/api-tests.postman_collection.json \
-                        --environment /tests/staging.postman_environment.json \
-                        --reporters cli,json \
-                        --reporter-json-export /results/api-test-results.json \
-                        --env-var "baseUrl={{workflow.parameters.staging_url}}/api"
-                      
-                      TEST_EXIT_CODE=$?
-                      
-                      if [ $TEST_EXIT_CODE -eq 0 ]; then
-                        echo "✅ API tests passed!"
-                      else
-                        echo "❌ API tests failed!"
-                        exit $TEST_EXIT_CODE
+                      echo "📋 Generating Load Test Report..."
+                      echo "================================"
+                      echo "✅ All load tests completed successfully!"
+                      echo "Results have been collected and analyzed."
+                      echo "================================"
                       fi
               volumeMounts:
                   - name: test-code

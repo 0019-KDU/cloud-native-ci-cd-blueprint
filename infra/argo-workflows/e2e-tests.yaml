@@ -17,11 +17,6 @@ spec:
               value: "http://staging.174.138.120.13.nip.io"
             - name: browser
               value: "chromium"
-              
-    # Artifact storage for test results
-    artifactRepositoryRef:
-        configMap: artifact-repositories
-        key: default-artifact-repository
         
     # TTL for workflow cleanup
     ttlStrategy:
@@ -137,22 +132,32 @@ spec:
           inputs:
               parameters:
                   - name: test-suite
-          container:
+          script:
               image: mcr.microsoft.com/playwright:v1.40.0-jammy
-              command: [sh, -c]
-              args:
-                  - |
-                      echo "🎭 Running E2E Tests: {{inputs.parameters.test-suite}}"
-                      
-                      # Clone test repository or use mounted tests
-                      cd /tests
-                      
-                      # Install dependencies
-                      npm ci
-                      
-                      # Run Playwright tests
-                      npx playwright test \
-                        --project={{workflow.parameters.browser}} \
+              command: [bash]
+              source: |
+                  #!/bin/bash
+                  set -e
+                  
+                  echo "🎭 Running E2E Tests: {{inputs.parameters.test-suite}}"
+                  
+                  # Clone repository to get test files
+                  git clone https://github.com/0019-KDU/cloud-native-ci-cd-blueprint.git /workspace
+                  cd /workspace/tests/e2e
+                  
+                  # Install dependencies
+                  npm ci
+                  
+                  # Set staging URL
+                  export BASE_URL="{{workflow.parameters.staging_url}}"
+                  
+                  # Run Playwright tests
+                  npx playwright test \
+                    --project={{workflow.parameters.browser}} \
+                    specs/*.spec.js \
+                    --reporter=list
+                  
+                  echo "✅ E2E tests completed successfully!"
                         tests/{{inputs.parameters.test-suite}}/ \
                         --reporter=html,json \
                         --output=/results/{{inputs.parameters.test-suite}}
