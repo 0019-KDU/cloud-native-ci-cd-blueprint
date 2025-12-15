@@ -125,11 +125,12 @@ jobs:
                   Blue-Green (Argo Rollouts)
 
                   ### ⚡ What happens next?
-                  1. This PR merges (auto-merge enabled)
-                  2. Preview deployment starts
-                  3. Smoke tests run on preview URL
-                  4. Manual approval required for promotion
-                  5. Traffic switches to new version
+                  1. Status checks run (GitOps validation)
+                  2. PR auto-merges after checks pass
+                  3. Preview deployment starts
+                  4. Smoke tests run on preview URL
+                  5. Manual approval required for promotion
+                  6. Traffic switches to new version
 
                   ---
                   *🤖 Triggered by: @${{ github.actor }}*" \
@@ -138,12 +139,14 @@ jobs:
 
                   PR_NUMBER=$(gh pr list --head ${{ env.BRANCH_NAME }} --json number --jq '.[0].number')
                   echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-                  echo "✅ Created PR #$PR_NUMBER"
+                  echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+                  echo "✅ Created PR #$PR_NUMBER: $PR_URL"
 
             - name: Enable auto-merge
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
+                  echo "🔄 Enabling auto-merge..."
                   gh pr merge ${{ steps.create-pr.outputs.pr_number }} --auto --squash
                   echo "✅ Auto-merge enabled"
 
@@ -151,17 +154,29 @@ jobs:
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  echo "⏳ Waiting for PR to merge..."
+                  echo "⏳ Waiting for checks to pass and PR to merge..."
+
                   for i in {1..60}; do
-                    STATE=$(gh pr view ${{ steps.create-pr.outputs.pr_number }} --json state --jq '.state')
-                    if [ "$STATE" = "MERGED" ]; then
-                      echo "✅ PR merged!"
+                    # Check PR state
+                    PR_STATE=$(gh pr view ${{ steps.create-pr.outputs.pr_number }} --json state --jq '.state')
+                    
+                    if [ "$PR_STATE" = "MERGED" ]; then
+                      echo "✅ PR merged successfully!"
                       exit 0
+                    elif [ "$PR_STATE" = "CLOSED" ]; then
+                      echo "❌ PR was closed without merging"
+                      exit 1
                     fi
-                    echo "Waiting... ($i/60) - State: $STATE"
+                    
+                    # Check merge status
+                    MERGEABLE=$(gh pr view ${{ steps.create-pr.outputs.pr_number }} --json mergeable --jq '.mergeable')
+                    echo "Attempt $i/60 - State: $PR_STATE, Mergeable: $MERGEABLE"
+                    
                     sleep 10
                   done
-                  echo "❌ PR did not merge in time"
+
+                  echo "❌ Timeout waiting for PR to merge"
+                  echo "Check the PR manually: ${{ steps.create-pr.outputs.pr_url }}"
                   exit 1
 
     # ============================================
