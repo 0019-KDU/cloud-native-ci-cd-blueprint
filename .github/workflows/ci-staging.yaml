@@ -176,6 +176,8 @@ jobs:
             - name: Install doctl
               run: |
                   sudo snap install doctl
+                  sudo snap connect doctl:kube-config
+                  mkdir -p $HOME/.kube
                   doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
             - name: Save kubeconfig
@@ -232,6 +234,8 @@ jobs:
             - name: Install doctl
               run: |
                   sudo snap install doctl
+                  sudo snap connect doctl:kube-config
+                  mkdir -p $HOME/.kube
                   doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
             - name: Save kubeconfig
@@ -292,6 +296,8 @@ jobs:
             - name: Install doctl
               run: |
                   sudo snap install doctl
+                  sudo snap connect doctl:kube-config
+                  mkdir -p $HOME/.kube
                   doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
             - name: Save kubeconfig
