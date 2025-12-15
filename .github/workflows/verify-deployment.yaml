@@ -31,9 +31,11 @@ jobs:
             - name: Extract image tag from kustomization
               id: get-tag
               run: |
-                  IMAGE_TAG=$(grep -A1 "newTag:" infra/k8s/overlays/dev/kustomization.yaml | grep -oP 'newTag:\s*"\K[^"]+' || grep -oP 'newTag:\s*\K\S+' infra/k8s/overlays/dev/kustomization.yaml)
-                  echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+                  # Extract image tag - handle both quoted and unquoted formats
+                  IMAGE_TAG=$(grep "newTag:" infra/k8s/overlays/dev/kustomization.yaml | head -1 | sed 's/.*newTag:\s*//; s/"//g; s/^[[:space:]]*//; s/[[:space:]]*$//')
+
                   echo "📦 Verifying deployment of image tag: $IMAGE_TAG"
+                  echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
             - name: Install doctl
               uses: digitalocean/action-doctl@v2
