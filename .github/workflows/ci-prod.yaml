@@ -69,23 +69,32 @@ jobs:
                   echo "========================"
 
     # ============================================
-    # JOB 2: Update Production Manifests
+    # JOB 2: Update Production Manifests (Create PR)
     # ============================================
     update-manifests:
         name: Update Production Manifests
         runs-on: ubuntu-latest
         needs: [validate]
+        outputs:
+            pr_number: ${{ steps.create-pr.outputs.pr_number }}
 
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
               with:
                   token: ${{ secrets.GITHUB_TOKEN }}
+                  fetch-depth: 0
 
             - name: Configure Git
               run: |
                   git config user.name "github-actions[bot]"
                   git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            - name: Create deployment branch
+              run: |
+                  BRANCH_NAME="deploy/prod-${{ inputs.image_tag }}"
+                  git checkout -b $BRANCH_NAME
+                  echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
             - name: Update production kustomization
               run: |
@@ -94,11 +103,66 @@ jobs:
                   echo "📝 Updated production kustomization:"
                   cat infra/k8s/overlays/prod/kustomization.yaml
 
-            - name: Commit and push
+            - name: Commit and push branch
               run: |
                   git add infra/k8s/overlays/prod/kustomization.yaml
                   git commit -m "🚀 Deploy to production: ${{ inputs.image_tag }}"
-                  git push origin main
+                  git push origin ${{ env.BRANCH_NAME }}
+
+            - name: Create Pull Request
+              id: create-pr
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  PR_URL=$(gh pr create \
+                    --title "🚀 Production Deploy: ${{ inputs.image_tag }}" \
+                    --body "## Production Deployment
+
+                  ### 📦 Image Tag
+                  \`${{ inputs.image_tag }}\`
+
+                  ### 🎯 Deployment Strategy
+                  Blue-Green (Argo Rollouts)
+
+                  ### ⚡ What happens next?
+                  1. This PR merges (auto-merge enabled)
+                  2. Preview deployment starts
+                  3. Smoke tests run on preview URL
+                  4. Manual approval required for promotion
+                  5. Traffic switches to new version
+
+                  ---
+                  *🤖 Triggered by: @${{ github.actor }}*" \
+                    --base main \
+                    --head ${{ env.BRANCH_NAME }})
+
+                  PR_NUMBER=$(gh pr list --head ${{ env.BRANCH_NAME }} --json number --jq '.[0].number')
+                  echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+                  echo "✅ Created PR #$PR_NUMBER"
+
+            - name: Enable auto-merge
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  gh pr merge ${{ steps.create-pr.outputs.pr_number }} --auto --squash
+                  echo "✅ Auto-merge enabled"
+
+            - name: Wait for PR to merge
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  echo "⏳ Waiting for PR to merge..."
+                  for i in {1..60}; do
+                    STATE=$(gh pr view ${{ steps.create-pr.outputs.pr_number }} --json state --jq '.state')
+                    if [ "$STATE" = "MERGED" ]; then
+                      echo "✅ PR merged!"
+                      exit 0
+                    fi
+                    echo "Waiting... ($i/60) - State: $STATE"
+                    sleep 10
+                  done
+                  echo "❌ PR did not merge in time"
+                  exit 1
 
     # ============================================
     # JOB 3: Deploy Preview (Blue-Green)
@@ -116,11 +180,9 @@ jobs:
               uses: actions/checkout@v4
 
             - name: Install doctl
-              run: |
-                  sudo snap install doctl
-                  sudo snap connect doctl:kube-config
-                  mkdir -p $HOME/.kube
-                  doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
             - name: Save kubeconfig
               run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
@@ -248,11 +310,9 @@ jobs:
 
         steps:
             - name: Install doctl
-              run: |
-                  sudo snap install doctl
-                  sudo snap connect doctl:kube-config
-                  mkdir -p $HOME/.kube
-                  doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
             - name: Save kubeconfig
               run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
@@ -430,11 +490,9 @@ jobs:
 
         steps:
             - name: Install doctl
-              run: |
-                  sudo snap install doctl
-                  sudo snap connect doctl:kube-config
-                  mkdir -p $HOME/.kube
-                  doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
             - name: Save kubeconfig
               run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
