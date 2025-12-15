@@ -1,0 +1,455 @@
+name: CI/CD - Production (Blue-Green)
+
+on:
+    workflow_dispatch:
+        inputs:
+            image_tag:
+                description: "Image tag to deploy (must be tested in staging)"
+                required: true
+                type: string
+            skip_smoke_test:
+                description: "Skip smoke tests on preview"
+                required: false
+                type: boolean
+                default: false
+            auto_promote:
+                description: "Auto-promote after smoke tests pass"
+                required: false
+                type: boolean
+                default: false
+
+permissions:
+    contents: write
+    pull-requests: write
+
+env:
+    REGISTRY: registry.digitalocean.com
+    IMAGE_NAME: ai-incident-assistant
+    PROD_NAMESPACE: prod
+    PROD_URL: http://app.174.138.120.13.nip.io
+    PREVIEW_URL: http://preview.174.138.120.13.nip.io
+
+jobs:
+    # ============================================
+    # JOB 1: Validate Image Tag
+    # ============================================
+    validate:
+        name: Validate Deployment
+        runs-on: ubuntu-latest
+        outputs:
+            image_tag: ${{ inputs.image_tag }}
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Validate image exists
+              run: |
+                  echo "🔍 Validating image tag: ${{ inputs.image_tag }}"
+
+                  # Check if this tag was deployed to staging
+                  STAGING_TAG=$(grep "newTag:" infra/k8s/overlays/staging/kustomization.yaml | sed 's/.*newTag:\s*//; s/"//g; s/[[:space:]]//g')
+
+                  if [ "$STAGING_TAG" != "${{ inputs.image_tag }}" ]; then
+                    echo "⚠️ Warning: Tag ${{ inputs.image_tag }} may not have been tested in staging"
+                    echo "   Staging has: $STAGING_TAG"
+                    echo ""
+                    echo "Proceeding anyway... (manual override)"
+                  else
+                    echo "✅ Tag ${{ inputs.image_tag }} was tested in staging"
+                  fi
+
+            - name: Confirm production deployment
+              run: |
+                  echo "🚀 PRODUCTION DEPLOYMENT"
+                  echo "========================"
+                  echo "Image Tag: ${{ inputs.image_tag }}"
+                  echo "Auto-Promote: ${{ inputs.auto_promote }}"
+                  echo "Skip Smoke Test: ${{ inputs.skip_smoke_test }}"
+                  echo "========================"
+
+    # ============================================
+    # JOB 2: Update Production Manifests
+    # ============================================
+    update-manifests:
+        name: Update Production Manifests
+        runs-on: ubuntu-latest
+        needs: [validate]
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Configure Git
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            - name: Update production kustomization
+              run: |
+                  sed -i "s|newTag:.*|newTag: \"${{ inputs.image_tag }}\"|g" infra/k8s/overlays/prod/kustomization.yaml
+
+                  echo "📝 Updated production kustomization:"
+                  cat infra/k8s/overlays/prod/kustomization.yaml
+
+            - name: Commit and push
+              run: |
+                  git add infra/k8s/overlays/prod/kustomization.yaml
+                  git commit -m "🚀 Deploy to production: ${{ inputs.image_tag }}"
+                  git push origin main
+
+    # ============================================
+    # JOB 3: Deploy Preview (Blue-Green)
+    # ============================================
+    deploy-preview:
+        name: Deploy Preview (Green)
+        runs-on: ubuntu-latest
+        needs: [validate, update-manifests]
+        environment:
+            name: production-preview
+            url: ${{ env.PREVIEW_URL }}
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install doctl
+              run: |
+                  sudo snap install doctl
+                  sudo snap connect doctl:kube-config
+                  mkdir -p $HOME/.kube
+                  doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+            - name: Save kubeconfig
+              run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
+
+            - name: Install Argo Rollouts CLI
+              run: |
+                  curl -LO https://github.com/argoproj/argo-rollouts/releases/download/v1.6.4/kubectl-argo-rollouts-linux-amd64
+                  chmod +x kubectl-argo-rollouts-linux-amd64
+                  sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+            - name: Sync ArgoCD
+              run: |
+                  echo "🔄 Triggering ArgoCD sync for production..."
+                  kubectl patch application ai-incident-prod -n argocd \
+                    --type merge \
+                    -p '{"operation": {"initiatedBy": {"username": "github-actions"}, "sync": {"revision": "HEAD"}}}' \
+                    || echo "⚠️ Manual sync may be required"
+
+            - name: Wait for preview deployment
+              run: |
+                  echo "⏳ Waiting for preview (green) deployment..."
+
+                  # Wait for rollout to create preview ReplicaSet
+                  sleep 30
+
+                  # Check rollout status
+                  kubectl-argo-rollouts status backend -n ${{ env.PROD_NAMESPACE }} --timeout 5m || true
+                  kubectl-argo-rollouts status frontend -n ${{ env.PROD_NAMESPACE }} --timeout 5m || true
+
+            - name: Get rollout status
+              run: |
+                  echo "📋 Backend Rollout Status:"
+                  kubectl-argo-rollouts get rollout backend -n ${{ env.PROD_NAMESPACE }}
+
+                  echo ""
+                  echo "📋 Frontend Rollout Status:"
+                  kubectl-argo-rollouts get rollout frontend -n ${{ env.PROD_NAMESPACE }}
+
+            - name: Display preview URL
+              run: |
+                  echo ""
+                  echo "🔗 Preview URL: ${{ env.PREVIEW_URL }}"
+                  echo ""
+                  echo "The new version is now available at the preview URL."
+                  echo "Production traffic still goes to the old version."
+
+    # ============================================
+    # JOB 4: Smoke Tests on Preview
+    # ============================================
+    smoke-tests:
+        name: Smoke Tests (Preview)
+        runs-on: ubuntu-latest
+        needs: [deploy-preview]
+        if: ${{ inputs.skip_smoke_test != true }}
+
+        steps:
+            - name: Wait for preview to be accessible
+              run: |
+                  echo "⏳ Waiting for preview to be accessible..."
+                  for i in {1..30}; do
+                    if curl -sf "${{ env.PREVIEW_URL }}" > /dev/null; then
+                      echo "✅ Preview is accessible!"
+                      break
+                    fi
+                    echo "Waiting... ($i/30)"
+                    sleep 10
+                  done
+
+            - name: Run smoke tests
+              run: |
+                  echo "🔥 Running smoke tests on preview..."
+
+                  # Test frontend
+                  echo "Testing frontend..."
+                  FRONTEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PREVIEW_URL }}")
+                  if [ "$FRONTEND_STATUS" = "200" ]; then
+                    echo "✅ Frontend: OK ($FRONTEND_STATUS)"
+                  else
+                    echo "❌ Frontend: FAILED ($FRONTEND_STATUS)"
+                    exit 1
+                  fi
+
+                  # Test backend API health
+                  echo "Testing backend API..."
+                  API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PREVIEW_URL }}/api/health")
+                  if [ "$API_STATUS" = "200" ]; then
+                    echo "✅ Backend API: OK ($API_STATUS)"
+                  else
+                    echo "❌ Backend API: FAILED ($API_STATUS)"
+                    exit 1
+                  fi
+
+                  # Test API response
+                  echo "Testing API response..."
+                  API_RESPONSE=$(curl -s "${{ env.PREVIEW_URL }}/api/health")
+                  echo "API Response: $API_RESPONSE"
+
+                  echo ""
+                  echo "✅ All smoke tests passed!"
+
+            - name: Test critical endpoints
+              run: |
+                  echo "🧪 Testing critical endpoints..."
+
+                  # Test incidents endpoint
+                  curl -sf "${{ env.PREVIEW_URL }}/api/incidents" > /dev/null && echo "✅ /api/incidents" || echo "⚠️ /api/incidents (may need auth)"
+
+                  # Test dashboard endpoint
+                  curl -sf "${{ env.PREVIEW_URL }}/api/dashboard" > /dev/null && echo "✅ /api/dashboard" || echo "⚠️ /api/dashboard (may need auth)"
+
+                  echo ""
+                  echo "✅ Critical endpoint tests completed!"
+
+    # ============================================
+    # JOB 5: Promote to Production
+    # ============================================
+    promote:
+        name: Promote to Production
+        runs-on: ubuntu-latest
+        needs: [validate, smoke-tests]
+        if: ${{ always() && (needs.smoke-tests.result == 'success' || inputs.skip_smoke_test == true) }}
+        environment:
+            name: production
+            url: ${{ env.PROD_URL }}
+
+        steps:
+            - name: Install doctl
+              run: |
+                  sudo snap install doctl
+                  sudo snap connect doctl:kube-config
+                  mkdir -p $HOME/.kube
+                  doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+            - name: Save kubeconfig
+              run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
+
+            - name: Install Argo Rollouts CLI
+              run: |
+                  curl -LO https://github.com/argoproj/argo-rollouts/releases/download/v1.6.4/kubectl-argo-rollouts-linux-amd64
+                  chmod +x kubectl-argo-rollouts-linux-amd64
+                  sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+            - name: Check if auto-promote
+              id: check-promote
+              run: |
+                  if [ "${{ inputs.auto_promote }}" = "true" ]; then
+                    echo "should_promote=true" >> $GITHUB_OUTPUT
+                    echo "🚀 Auto-promote enabled, promoting immediately..."
+                  else
+                    echo "should_promote=true" >> $GITHUB_OUTPUT
+                    echo "⏳ Manual promotion through GitHub environment approval..."
+                  fi
+
+            - name: Promote backend rollout
+              if: steps.check-promote.outputs.should_promote == 'true'
+              run: |
+                  echo "🚀 Promoting backend to production..."
+                  kubectl-argo-rollouts promote backend -n ${{ env.PROD_NAMESPACE }}
+
+                  echo "⏳ Waiting for backend promotion..."
+                  kubectl-argo-rollouts status backend -n ${{ env.PROD_NAMESPACE }} --timeout 5m
+
+            - name: Promote frontend rollout
+              if: steps.check-promote.outputs.should_promote == 'true'
+              run: |
+                  echo "🚀 Promoting frontend to production..."
+                  kubectl-argo-rollouts promote frontend -n ${{ env.PROD_NAMESPACE }}
+
+                  echo "⏳ Waiting for frontend promotion..."
+                  kubectl-argo-rollouts status frontend -n ${{ env.PROD_NAMESPACE }} --timeout 5m
+
+            - name: Verify production deployment
+              run: |
+                  echo "🔍 Verifying production deployment..."
+
+                  # Check rollout status
+                  echo "📋 Backend Status:"
+                  kubectl-argo-rollouts get rollout backend -n ${{ env.PROD_NAMESPACE }}
+
+                  echo ""
+                  echo "📋 Frontend Status:"
+                  kubectl-argo-rollouts get rollout frontend -n ${{ env.PROD_NAMESPACE }}
+
+                  # Verify production is accessible
+                  echo ""
+                  echo "🌐 Testing production URL..."
+                  PROD_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PROD_URL }}")
+                  if [ "$PROD_STATUS" = "200" ]; then
+                    echo "✅ Production is live: ${{ env.PROD_URL }}"
+                  else
+                    echo "⚠️ Production returned: $PROD_STATUS"
+                  fi
+
+    # ============================================
+    # JOB 6: Notify
+    # ============================================
+    notify-success:
+        name: Notify Success
+        runs-on: ubuntu-latest
+        needs: [validate, promote]
+        if: success()
+
+        steps:
+            - name: Send Slack - Production Success
+              uses: slackapi/slack-github-action@v1.26.0
+              with:
+                  payload: |
+                      {
+                        "text": "🚀 Production deployment successful!",
+                        "blocks": [
+                          {
+                            "type": "header",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "🚀 Production Deployment Complete"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "fields": [
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Image Tag:*\n`${{ inputs.image_tag }}`"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Deployed by:*\n${{ github.actor }}"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Strategy:*\nBlue-Green ✅"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Smoke Tests:*\n${{ inputs.skip_smoke_test && '⏭️ Skipped' || '✅ Passed' }}"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "🌐 <${{ env.PROD_URL }}|View Production>"
+                            }
+                          }
+                        ]
+                      }
+              env:
+                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+                  SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+    notify-failure:
+        name: Notify Failure
+        runs-on: ubuntu-latest
+        needs: [validate, deploy-preview, smoke-tests, promote]
+        if: failure()
+
+        steps:
+            - name: Send Slack - Failure
+              uses: slackapi/slack-github-action@v1.26.0
+              with:
+                  payload: |
+                      {
+                        "text": "❌ Production deployment failed!",
+                        "blocks": [
+                          {
+                            "type": "header",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "❌ Production Deployment Failed"
+                            }
+                          },
+                          {
+                            "type": "section",
+                            "fields": [
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Image Tag:*\n`${{ inputs.image_tag }}`"
+                              },
+                              {
+                                "type": "mrkdwn",
+                                "text": "*Triggered by:*\n${{ github.actor }}"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "section",
+                            "text": {
+                              "type": "mrkdwn",
+                              "text": "⚠️ The preview deployment may still be active. Check Argo Rollouts dashboard to abort if needed.\n\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔗 View Failed Run>"
+                            }
+                          }
+                        ]
+                      }
+              env:
+                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+                  SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+    # ============================================
+    # JOB 7: Rollback (Manual)
+    # ============================================
+    rollback:
+        name: Rollback (if needed)
+        runs-on: ubuntu-latest
+        needs: [promote]
+        if: failure()
+
+        steps:
+            - name: Install doctl
+              run: |
+                  sudo snap install doctl
+                  sudo snap connect doctl:kube-config
+                  mkdir -p $HOME/.kube
+                  doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+            - name: Save kubeconfig
+              run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
+
+            - name: Install Argo Rollouts CLI
+              run: |
+                  curl -LO https://github.com/argoproj/argo-rollouts/releases/download/v1.6.4/kubectl-argo-rollouts-linux-amd64
+                  chmod +x kubectl-argo-rollouts-linux-amd64
+                  sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+            - name: Abort rollout
+              run: |
+                  echo "🔙 Aborting rollouts..."
+
+                  kubectl-argo-rollouts abort backend -n ${{ env.PROD_NAMESPACE }} || true
+                  kubectl-argo-rollouts abort frontend -n ${{ env.PROD_NAMESPACE }} || true
+
+                  echo "✅ Rollouts aborted. Previous version is still active."

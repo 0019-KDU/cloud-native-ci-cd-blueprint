@@ -5,7 +5,13 @@ kind: Kustomization
 
 # Base reference
 resources:
-- ../../base
+- ../../base/configmap.yaml
+- ../../base/namespace.yaml
+- ../../base/postgres-statefulset.yaml
+- ../../base/services.yaml
+- ../../base/networkpolicy.yaml
+- rollout.yaml
+
 
 # Target namespace
 namespace: prod
@@ -13,52 +19,17 @@ namespace: prod
 # Common labels for production environment
 commonLabels:
   environment: production
+  managed-by: argocd
 
-# Replica counts for production (high availability)
-replicas:
-- count: 3
-  name: backend
-- count: 3
-  name: frontend
+# Replica counts removed - using Rollout spec instead
+# replicas:
+# - count: 3
+#   name: backend
+# - count: 3
+#   name: frontend
 
-# Resource patches for production environment (full resources)
-
-
-
-# Ingress host patch for production
+# Resource patches for PostgreSQL only
 patches:
-- patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/requests/cpu
-      value: "100m"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/requests/memory
-      value: "128Mi"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/limits/cpu
-      value: "500m"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/limits/memory
-      value: "512Mi"
-  target:
-    kind: Deployment
-    name: backend
-- patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/requests/cpu
-      value: "50m"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/requests/memory
-      value: "64Mi"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/limits/cpu
-      value: "200m"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/limits/memory
-      value: "256Mi"
-  target:
-    kind: Deployment
-    name: frontend
 - patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/resources/requests/cpu
@@ -75,30 +46,6 @@ patches:
   target:
     kind: StatefulSet
     name: postgres
-- patch: |-
-    - op: replace
-      path: /spec/rules/0
-      value:
-        host: prod.174.138.120.13.nip.io
-        http:
-          paths:
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: backend
-                port:
-                  number: 3001
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: frontend
-                port:
-                  number: 80
-  target:
-    kind: Ingress
-    name: ai-incident-assistant
 
 # ConfigMap for production-specific configuration
 configMapGenerator:
