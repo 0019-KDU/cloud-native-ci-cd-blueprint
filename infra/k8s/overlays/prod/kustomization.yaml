@@ -5,11 +5,7 @@ kind: Kustomization
 
 # Base reference
 resources:
-- ../../base/configmap.yaml
-- ../../base/namespace.yaml
-- ../../base/postgres-statefulset.yaml
-- ../../base/services.yaml
-- ../../base/networkpolicy.yaml
+- ../../base
 - rollout.yaml
 
 
@@ -30,6 +26,18 @@ commonLabels:
 
 # Resource patches for PostgreSQL only
 patches:
+- patch: |-
+    $patch: delete
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: backend
+- patch: |-
+    $patch: delete
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: frontend
 - patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/resources/requests/cpu
