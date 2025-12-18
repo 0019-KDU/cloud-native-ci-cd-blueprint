@@ -77,10 +77,17 @@ images:
 - name: registry.digitalocean.com/ai-incident-assistant/backend
   newName: registry.digitalocean.com/ai-incident-assistant/backend
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   newTag: b387808985929fb1fa92b32ed2c3a212a7884789
 - name: registry.digitalocean.com/ai-incident-assistant/frontend
   newName: registry.digitalocean.com/ai-incident-assistant/frontend
   newTag: b387808985929fb1fa92b32ed2c3a212a7884789
+=======
+  newTag: "8e733224e5eb6afd607f3a1b16e3fdc822f853dd"
+- name: registry.digitalocean.com/ai-incident-assistant/frontend
+  newName: registry.digitalocean.com/ai-incident-assistant/frontend
+  newTag: "8e733224e5eb6afd607f3a1b16e3fdc822f853dd"
+>>>>>>> Stashed changes
 =======
   newTag: "8e733224e5eb6afd607f3a1b16e3fdc822f853dd"
 - name: registry.digitalocean.com/ai-incident-assistant/frontend
