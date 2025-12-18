@@ -1,190 +1,187 @@
 name: Verify Deployment
 
 on:
-    push:
-        branches:
-            - main
-        paths:
-            - "infra/k8s/overlays/dev/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "infra/k8s/overlays/dev/**"
 
 permissions:
-    contents: read
+  contents: read
 
 env:
-    DEV_NAMESPACE: dev
+  DEV_NAMESPACE: dev
 
 jobs:
-    # ============================================
-    # Verify ArgoCD Deployment
-    # ============================================
-    verify-deployment:
-        name: Verify Dev Deployment
-        runs-on: ubuntu-latest
-        environment:
-            name: development
-            url: http://dev.174.138.120.13.nip.io
+  # ============================================
+  # Verify ArgoCD Deployment
+  # ============================================
+  verify-deployment:
+    name: Verify Dev Deployment
+    runs-on: ubuntu-latest
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Extract image tag from kustomization
-              id: get-tag
-              run: |
-                  # Extract image tag - handle both quoted and unquoted formats
-                  IMAGE_TAG=$(grep "newTag:" infra/k8s/overlays/dev/kustomization.yaml | head -1 | sed 's/.*newTag:\s*//; s/"//g; s/^[[:space:]]*//; s/[[:space:]]*$//')
+      - name: Extract image tag from kustomization
+        id: get-tag
+        run: |
+          # Extract image tag - handle both quoted and unquoted formats
+          IMAGE_TAG=$(grep "newTag:" infra/k8s/overlays/dev/kustomization.yaml | head -1 | sed 's/.*newTag:\s*//; s/"//g; s/^[[:space:]]*//; s/[[:space:]]*$//')
 
-                  echo "📦 Verifying deployment of image tag: $IMAGE_TAG"
-                  echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "📦 Verifying deployment of image tag: $IMAGE_TAG"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
-            - name: Install doctl
-              uses: digitalocean/action-doctl@v2
-              with:
-                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-            - name: Save DigitalOcean kubeconfig
-              run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
+      - name: Save DigitalOcean kubeconfig
+        run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
 
-            - name: Wait for ArgoCD sync
-              run: |
-                  echo "⏳ Waiting 60 seconds for ArgoCD to detect and sync changes..."
-                  sleep 60
+      - name: Wait for ArgoCD sync
+        run: |
+          echo "⏳ Waiting 60 seconds for ArgoCD to detect and sync changes..."
+          sleep 60
 
-            - name: Verify deployment rollout
-              id: verify
-              run: |
-                  echo "🔍 Checking deployment status..."
+      - name: Verify deployment rollout
+        id: verify
+        run: |
+          echo "🔍 Checking deployment status..."
 
-                  # Wait for backend rollout
-                  if kubectl rollout status deployment/backend -n ${{ env.DEV_NAMESPACE }} --timeout=5m; then
-                    echo "✅ Backend deployment successful"
-                  else
-                    echo "❌ Backend deployment failed"
-                    exit 1
-                  fi
+          # Wait for backend rollout
+          if kubectl rollout status deployment/backend -n ${{ env.DEV_NAMESPACE }} --timeout=5m; then
+            echo "✅ Backend deployment successful"
+          else
+            echo "❌ Backend deployment failed"
+            exit 1
+          fi
 
-                  # Wait for frontend rollout
-                  if kubectl rollout status deployment/frontend -n ${{ env.DEV_NAMESPACE }} --timeout=5m; then
-                    echo "✅ Frontend deployment successful"
-                  else
-                    echo "❌ Frontend deployment failed"
-                    exit 1
-                  fi
+          # Wait for frontend rollout
+          if kubectl rollout status deployment/frontend -n ${{ env.DEV_NAMESPACE }} --timeout=5m; then
+            echo "✅ Frontend deployment successful"
+          else
+            echo "❌ Frontend deployment failed"
+            exit 1
+          fi
 
-            - name: Verify running pods
-              run: |
-                  echo "📋 Current pods in ${{ env.DEV_NAMESPACE }}:"
-                  kubectl get pods -n ${{ env.DEV_NAMESPACE }} -o wide
+      - name: Verify running pods
+        run: |
+          echo "📋 Current pods in ${{ env.DEV_NAMESPACE }}:"
+          kubectl get pods -n ${{ env.DEV_NAMESPACE }} -o wide
 
-                  echo ""
-                  echo "📋 Deployment status:"
-                  kubectl get deployments -n ${{ env.DEV_NAMESPACE }}
+          echo ""
+          echo "📋 Deployment status:"
+          kubectl get deployments -n ${{ env.DEV_NAMESPACE }}
 
-            - name: Health check
-              run: |
-                  echo "🏥 Running health checks..."
+      - name: Health check
+        run: |
+          echo "🏥 Running health checks..."
 
-                  # Get backend pod (handle case where no pods exist yet)
-                  BACKEND_POD=$(kubectl get pods -n ${{ env.DEV_NAMESPACE }} -l app.kubernetes.io/component=api --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          # Get backend pod (handle case where no pods exist yet)
+          BACKEND_POD=$(kubectl get pods -n ${{ env.DEV_NAMESPACE }} -l app.kubernetes.io/component=api --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 
-                  if [ -z "$BACKEND_POD" ]; then
-                    echo "⚠️ No running backend pods found yet, waiting..."
-                    kubectl wait --for=condition=available deployment/backend -n ${{ env.DEV_NAMESPACE }} --timeout=120s
-                    BACKEND_POD=$(kubectl get pods -n ${{ env.DEV_NAMESPACE }} -l app.kubernetes.io/component=api --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
-                  fi
+          if [ -z "$BACKEND_POD" ]; then
+            echo "⚠️ No running backend pods found yet, waiting..."
+            kubectl wait --for=condition=available deployment/backend -n ${{ env.DEV_NAMESPACE }} --timeout=120s
+            BACKEND_POD=$(kubectl get pods -n ${{ env.DEV_NAMESPACE }} -l app.kubernetes.io/component=api --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+          fi
 
-                  # Check if backend is ready
-                  echo "📋 Checking backend pod: $BACKEND_POD"
-                  kubectl wait --for=condition=ready pod/$BACKEND_POD -n ${{ env.DEV_NAMESPACE }} --timeout=60s
+          # Check if backend is ready
+          echo "📋 Checking backend pod: $BACKEND_POD"
+          kubectl wait --for=condition=ready pod/$BACKEND_POD -n ${{ env.DEV_NAMESPACE }} --timeout=60s
 
-                  echo "✅ All health checks passed"
+          echo "✅ All health checks passed"
 
-            - name: Send Slack notification - Success
-              if: success()
-              uses: slackapi/slack-github-action@v1.26.0
-              with:
-                  payload: |
-                      {
-                        "text": "✅ Deployment to DEV successful!",
-                        "blocks": [
-                          {
-                            "type": "header",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "✅ Deployment Verified - Dev Environment"
-                            }
-                          },
-                          {
-                            "type": "section",
-                            "fields": [
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Image Tag:*\n`${{ steps.get-tag.outputs.image_tag }}`"
-                              },
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Environment:*\nDevelopment"
-                              },
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Status:*\n✅ Healthy"
-                              },
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Synced By:*\nArgoCD"
-                              }
-                            ]
-                          },
-                          {
-                            "type": "section",
-                            "text": {
-                              "type": "mrkdwn",
-                              "text": "<http://dev.174.138.120.13.nip.io|🔗 View Dev Environment>"
-                            }
-                          }
-                        ]
-                      }
-              env:
-                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-                  SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+      - name: Send Slack notification - Success
+        if: success()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "✅ Deployment to DEV successful!",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "✅ Deployment Verified - Dev Environment"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Image Tag:*\n`${{ steps.get-tag.outputs.image_tag }}`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nDevelopment"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Status:*\n✅ Healthy"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Synced By:*\nArgoCD"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "<http://dev.174.138.120.13.nip.io|🔗 View Dev Environment>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
-            - name: Send Slack notification - Failure
-              if: failure()
-              uses: slackapi/slack-github-action@v1.26.0
-              with:
-                  payload: |
-                      {
-                        "text": "❌ Deployment verification failed!",
-                        "blocks": [
-                          {
-                            "type": "header",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "❌ Deployment Verification Failed - Dev Environment"
-                            }
-                          },
-                          {
-                            "type": "section",
-                            "fields": [
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Image Tag:*\n`${{ steps.get-tag.outputs.image_tag }}`"
-                              },
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Environment:*\nDevelopment"
-                              }
-                            ]
-                          },
-                          {
-                            "type": "section",
-                            "text": {
-                              "type": "mrkdwn",
-                              "text": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔗 View Failed Verification>"
-                            }
-                          }
-                        ]
-                      }
-              env:
-                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-                  SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+      - name: Send Slack notification - Failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "❌ Deployment verification failed!",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "❌ Deployment Verification Failed - Dev Environment"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Image Tag:*\n`${{ steps.get-tag.outputs.image_tag }}`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nDevelopment"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔗 View Failed Verification>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
