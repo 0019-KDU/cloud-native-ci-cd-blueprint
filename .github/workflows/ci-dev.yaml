@@ -1,454 +1,454 @@
 name: CI/CD - Dev Environment
 
 on:
-    push:
-        branches:
-            - main
-            - develop
-        paths:
-            - "backend/**"
-            - "frontend/**"
-            - "infra/docker/**"
-            - ".trivyignore"
-            - ".github/workflows/ci-dev.yaml"
-            # Explicitly exclude kustomization files
-            - "!infra/k8s/overlays/**/kustomization.yaml"
-            - "!infra/k8s/base/kustomization.yaml"
-    pull_request:
-        branches:
-            - main
-            - develop
-        paths:
-            - "backend/**"
-            - "frontend/**"
-            - "infra/docker/**"
-            - "infra/k8s/**"
-            - ".github/workflows/ci-dev.yaml"
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "infra/docker/**"
+      - ".trivyignore"
+      - ".github/workflows/ci-dev.yaml"
+      # Explicitly exclude kustomization files
+      - "!infra/k8s/overlays/**/kustomization.yaml"
+      - "!infra/k8s/base/kustomization.yaml"
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "infra/docker/**"
+      - "infra/k8s/**"
+      - ".github/workflows/ci-dev.yaml"
 
 permissions:
-    contents: write
-    security-events: write
-    pull-requests: write
+  contents: write
+  security-events: write
+  pull-requests: write
 
 env:
-    REGISTRY: registry.digitalocean.com
-    IMAGE_NAME: ai-incident-assistant
-    DEV_NAMESPACE: dev
+  REGISTRY: registry.digitalocean.com
+  IMAGE_NAME: ai-incident-assistant
+  DEV_NAMESPACE: dev
 
 jobs:
-    # ============================================
-    # JOB 1: Backend Tests & Quality Checks
-    # ============================================
-    backend-test:
-        name: Backend Tests & SonarQube
-        runs-on: ubuntu-latest
+  # ============================================
+  # JOB 1: Backend Tests & Quality Checks
+  # ============================================
+  backend-test:
+    name: Backend Tests & SonarQube
+    runs-on: ubuntu-latest
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-              with:
-                  fetch-depth: 0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-            - name: Setup Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "20"
-                  cache: "npm"
-                  cache-dependency-path: backend/package-lock.json
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
 
-            - name: Install dependencies
-              working-directory: backend
-              run: npm ci
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
 
-            - name: Run tests with coverage
-              working-directory: backend
-              run: npm run test:ci
+      - name: Run tests with coverage
+        working-directory: backend
+        run: npm run test:ci
 
-            - name: SonarQube Scan - Backend
-              uses: SonarSource/sonarqube-scan-action@master
-              env:
-                  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-                  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-              with:
-                  projectBaseDir: backend
-                  args: >
-                      -Dsonar.projectKey=ai-incident-backend
-                      -Dsonar.sources=src
-                      -Dsonar.tests=src/__tests__
-                      -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
-                      -Dsonar.coverage.exclusions=**/__tests__/**,**/node_modules/**
+      - name: SonarQube Scan - Backend
+        uses: SonarSource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: backend
+          args: >
+            -Dsonar.projectKey=ai-incident-backend
+            -Dsonar.sources=src
+            -Dsonar.tests=src/__tests__
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.coverage.exclusions=**/__tests__/**,**/node_modules/**
 
-    # ============================================
-    # JOB 2: Frontend Tests & Quality Checks
-    # ============================================
-    frontend-test:
-        name: Frontend Tests & SonarQube
-        runs-on: ubuntu-latest
+  # ============================================
+  # JOB 2: Frontend Tests & Quality Checks
+  # ============================================
+  frontend-test:
+    name: Frontend Tests & SonarQube
+    runs-on: ubuntu-latest
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-              with:
-                  fetch-depth: 0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-            - name: Setup Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "20"
-                  cache: "npm"
-                  cache-dependency-path: frontend/package-lock.json
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
 
-            - name: Install dependencies
-              working-directory: frontend
-              run: npm ci
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
 
-            - name: Run linter
-              working-directory: frontend
-              run: npm run lint
+      - name: Run linter
+        working-directory: frontend
+        run: npm run lint
 
-            - name: Build frontend
-              working-directory: frontend
-              run: npm run build
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
 
-            - name: SonarQube Scan - Frontend
-              uses: SonarSource/sonarqube-scan-action@master
-              env:
-                  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-                  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-              with:
-                  projectBaseDir: frontend
-                  args: >
-                      -Dsonar.projectKey=ai-incident-frontend
-                      -Dsonar.sources=src
-                      -Dsonar.exclusions=**/node_modules/**,**/dist/**
+      - name: SonarQube Scan - Frontend
+        uses: SonarSource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: frontend
+          args: >
+            -Dsonar.projectKey=ai-incident-frontend
+            -Dsonar.sources=src
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**
 
-    # ============================================
-    # JOB 3: Build & Scan Backend Image
-    # ============================================
-    build-backend:
-        name: Build & Scan Backend
-        runs-on: ubuntu-latest
-        needs: [backend-test]
-        outputs:
-            image_tag: ${{ github.sha }}
+  # ============================================
+  # JOB 3: Build & Scan Backend Image
+  # ============================================
+  build-backend:
+    name: Build & Scan Backend
+    runs-on: ubuntu-latest
+    needs: [backend-test]
+    outputs:
+      image_tag: ${{ github.sha }}
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Install doctl
-              uses: digitalocean/action-doctl@v2
-              with:
-                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-            - name: Log in to DigitalOcean Container Registry
-              run: doctl registry login --expiry-seconds 1200
+      - name: Log in to DigitalOcean Container Registry
+        run: doctl registry login --expiry-seconds 1200
 
-            - name: Build backend image
-              run: |
-                  docker build \
-                    -f infra/docker/backend.Dockerfile \
-                    -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }} \
-                    -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:latest \
-                    .
+      - name: Build backend image
+        run: |
+          docker build \
+            -f infra/docker/backend.Dockerfile \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:latest \
+            .
 
-            - name: Run Trivy vulnerability scanner - Backend
-              uses: aquasecurity/trivy-action@master
-              with:
-                  image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
-                  format: "sarif"
-                  output: "trivy-backend-results.sarif"
-                  severity: "CRITICAL,HIGH"
+      - name: Run Trivy vulnerability scanner - Backend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
+          format: "sarif"
+          output: "trivy-backend-results.sarif"
+          severity: "CRITICAL,HIGH"
 
-            - name: Upload Trivy results to GitHub Security
-              uses: github/codeql-action/upload-sarif@v3
-              if: always()
-              with:
-                  sarif_file: "trivy-backend-results.sarif"
-                  category: "trivy-backend"
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: "trivy-backend-results.sarif"
+          category: "trivy-backend"
 
-            - name: Trivy scan report (fail on critical)
-              uses: aquasecurity/trivy-action@master
-              with:
-                  image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
-                  format: "table"
-                  exit-code: "1"
-                  severity: "CRITICAL"
+      - name: Trivy scan report (fail on critical)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL"
 
-            - name: Push backend image
-              if: github.event_name == 'push'
-              run: |
-                  docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
-                  docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:latest
+      - name: Push backend image
+        if: github.event_name == 'push'
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:latest
 
-    # ============================================
-    # JOB 4: Build & Scan Frontend Image
-    # ============================================
-    build-frontend:
-        name: Build & Scan Frontend
-        runs-on: ubuntu-latest
-        needs: [frontend-test]
-        outputs:
-            image_tag: ${{ github.sha }}
+  # ============================================
+  # JOB 4: Build & Scan Frontend Image
+  # ============================================
+  build-frontend:
+    name: Build & Scan Frontend
+    runs-on: ubuntu-latest
+    needs: [frontend-test]
+    outputs:
+      image_tag: ${{ github.sha }}
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Install doctl
-              uses: digitalocean/action-doctl@v2
-              with:
-                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-            - name: Log in to DigitalOcean Container Registry
-              run: doctl registry login --expiry-seconds 1200
+      - name: Log in to DigitalOcean Container Registry
+        run: doctl registry login --expiry-seconds 1200
 
-            - name: Build frontend image
-              run: |
-                  docker build \
-                    -f infra/docker/frontend.Dockerfile \
-                    -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }} \
-                    -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest \
-                    .
+      - name: Build frontend image
+        run: |
+          docker build \
+            -f infra/docker/frontend.Dockerfile \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest \
+            .
 
-            - name: Run Trivy vulnerability scanner - Frontend
-              uses: aquasecurity/trivy-action@master
-              with:
-                  image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
-                  format: "sarif"
-                  output: "trivy-frontend-results.sarif"
-                  severity: "CRITICAL,HIGH"
+      - name: Run Trivy vulnerability scanner - Frontend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
+          format: "sarif"
+          output: "trivy-frontend-results.sarif"
+          severity: "CRITICAL,HIGH"
 
-            - name: Upload Trivy results to GitHub Security
-              uses: github/codeql-action/upload-sarif@v3
-              if: always()
-              with:
-                  sarif_file: "trivy-frontend-results.sarif"
-                  category: "trivy-frontend"
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: "trivy-frontend-results.sarif"
+          category: "trivy-frontend"
 
-            - name: Trivy scan report (fail on critical)
-              uses: aquasecurity/trivy-action@master
-              with:
-                  image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
-                  format: "table"
-                  exit-code: "1"
-                  severity: "CRITICAL"
+      - name: Trivy scan report (fail on critical)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL"
 
-            - name: Push frontend image
-              if: github.event_name == 'push'
-              run: |
-                  docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
-                  docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest
+      - name: Push frontend image
+        if: github.event_name == 'push'
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest
 
-    # ============================================
-    # JOB 5: Update GitOps Manifests (Create PR)
-    # ============================================
-    update-manifests:
-        name: Update GitOps Manifests
-        runs-on: ubuntu-latest
-        needs: [build-backend, build-frontend]
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        outputs:
-            pr_number: ${{ steps.create-pr.outputs.pr_number }}
-            pr_url: ${{ steps.create-pr.outputs.pr_url }}
+  # ============================================
+  # JOB 5: Update GitOps Manifests (Create PR)
+  # ============================================
+  update-manifests:
+    name: Update GitOps Manifests
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      pr_number: ${{ steps.create-pr.outputs.pr_number }}
+      pr_url: ${{ steps.create-pr.outputs.pr_url }}
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-              with:
-                  token: ${{ secrets.GITHUB_TOKEN }}
-                  fetch-depth: 0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
-            - name: Configure Git
-              run: |
-                  git config user.name "github-actions[bot]"
-                  git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-            - name: Create deployment branch
-              run: |
-                  BRANCH_NAME="deploy/dev-${{ github.sha }}"
-                  git checkout -b $BRANCH_NAME
-                  echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+      - name: Create deployment branch
+        run: |
+          BRANCH_NAME="deploy/dev-${{ github.sha }}"
+          git checkout -b $BRANCH_NAME
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
-            - name: Update image tags in kustomization
-              run: |
-                  cd infra/k8s/overlays/dev
+      - name: Update image tags in kustomization
+        run: |
+          cd infra/k8s/overlays/dev
 
-                  # Update using kustomize edit (cleaner approach)
-                  # Or use sed for direct replacement
-                  sed -i "s|newTag: .*|newTag: \"${{ github.sha }}\"|g" kustomization.yaml
+          # Update using kustomize edit (cleaner approach)
+          # Or use sed for direct replacement
+          sed -i "s|newTag: .*|newTag: \"${{ github.sha }}\"|g" kustomization.yaml
 
-                  echo "📝 Updated kustomization.yaml:"
-                  cat kustomization.yaml
+          echo "📝 Updated kustomization.yaml:"
+          cat kustomization.yaml
 
-            - name: Commit and push changes
-              run: |
-                  git add infra/k8s/overlays/dev/kustomization.yaml
-                  git commit -m "🚀 Deploy to dev: Update images to ${{ github.sha }} [skip ci]"
-                  git push origin ${{ env.BRANCH_NAME }}
+      - name: Commit and push changes
+        run: |
+          git add infra/k8s/overlays/dev/kustomization.yaml
+          git commit -m "🚀 Deploy to dev: Update images to ${{ github.sha }}"
+          git push origin ${{ env.BRANCH_NAME }}
 
-            - name: Create Pull Request
-              id: create-pr
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  # Create PR
-                  PR_URL=$(gh pr create \
-                    --title "🚀 Deploy to Dev: ${{ github.sha }}" \
-                    --body "## Automated Deployment to Dev Environment
+      - name: Create Pull Request
+        id: create-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create PR
+          PR_URL=$(gh pr create \
+            --title "🚀 Deploy to Dev: ${{ github.sha }}" \
+            --body "## Automated Deployment to Dev Environment
 
-                  ### 📦 Image Updates
-                  | Component | New Tag |
-                  |-----------|---------|
-                  | Backend | \`${{ github.sha }}\` |
-                  | Frontend | \`${{ github.sha }}\` |
+          ### 📦 Image Updates
+          | Component | New Tag |
+          |-----------|---------|
+          | Backend | \`${{ github.sha }}\` |
+          | Frontend | \`${{ github.sha }}\` |
 
-                  ### 🔗 References
-                  - **Source Commit:** [${{ github.sha }}](${{ github.event.head_commit.url }})
-                  - **Author:** @${{ github.actor }}
-                  - **Message:** ${{ github.event.head_commit.message }}
+          ### 🔗 References
+          - **Source Commit:** [${{ github.sha }}](${{ github.event.head_commit.url }})
+          - **Author:** @${{ github.actor }}
+          - **Message:** ${{ github.event.head_commit.message }}
 
-                  ---
+          ---
 
-                  ### ⚡ What happens next?
-                  1. This PR will be auto-merged after checks pass
-                  2. ArgoCD will detect the change and sync to dev cluster
-                  3. You'll receive a Slack notification when deployment completes
+          ### ⚡ What happens next?
+          1. This PR will be auto-merged after checks pass
+          2. ArgoCD will detect the change and sync to dev cluster
+          3. You'll receive a Slack notification when deployment completes
 
-                  ---
-                  *🤖 This PR was automatically created by CI/CD pipeline*" \
-                    --base main \
-                    --head ${{ env.BRANCH_NAME }})
+          ---
+          *🤖 This PR was automatically created by CI/CD pipeline*" \
+            --base main \
+            --head ${{ env.BRANCH_NAME }})
 
-                  PR_NUMBER=$(gh pr list --head ${{ env.BRANCH_NAME }} --json number --jq '.[0].number')
+          PR_NUMBER=$(gh pr list --head ${{ env.BRANCH_NAME }} --json number --jq '.[0].number')
 
-                  echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-                  echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
-                  echo "✅ Created PR #$PR_NUMBER: $PR_URL"
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "✅ Created PR #$PR_NUMBER: $PR_URL"
 
-            - name: Enable Auto-Merge
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  PR_NUMBER=${{ steps.create-pr.outputs.pr_number }}
+      - name: Enable Auto-Merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=${{ steps.create-pr.outputs.pr_number }}
 
-                  # Enable auto-merge (squash)
-                  gh pr merge $PR_NUMBER --auto --squash || echo "Auto-merge may need to be enabled in repo settings"
+          # Enable auto-merge (squash)
+          gh pr merge $PR_NUMBER --auto --squash || echo "Auto-merge may need to be enabled in repo settings"
 
-                  echo "✅ Auto-merge enabled for PR #$PR_NUMBER"
+          echo "✅ Auto-merge enabled for PR #$PR_NUMBER"
 
-    # ============================================
-    # JOB 6: Notify on PR Creation
-    # ============================================
-    notify-pr-created:
-        name: Notify PR Created
-        runs-on: ubuntu-latest
-        needs: [update-manifests]
-        if: needs.update-manifests.result == 'success'
+  # ============================================
+  # JOB 6: Notify on PR Creation
+  # ============================================
+  notify-pr-created:
+    name: Notify PR Created
+    runs-on: ubuntu-latest
+    needs: [update-manifests]
+    if: needs.update-manifests.result == 'success'
 
-        steps:
-            - name: Send Slack notification - PR Created
-              uses: slackapi/slack-github-action@v1.26.0
-              with:
-                  payload: |
-                      {
-                        "text": "🔄 Deployment PR created for DEV",
-                        "blocks": [
-                          {
-                            "type": "header",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "🔄 Deployment PR Created - Dev Environment"
-                            }
-                          },
-                          {
-                            "type": "section",
-                            "fields": [
-                              {
-                                "type": "mrkdwn",
-                                "text": "*PR:*\n<${{ needs.update-manifests.outputs.pr_url }}|#${{ needs.update-manifests.outputs.pr_number }}>"
-                              },
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Image Tag:*\n`${{ github.sha }}`"
-                              },
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Author:*\n${{ github.actor }}"
-                              },
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Status:*\nAwaiting auto-merge"
-                              }
-                            ]
-                          }
-                        ]
-                      }
-              env:
-                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-                  SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+    steps:
+      - name: Send Slack notification - PR Created
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "🔄 Deployment PR created for DEV",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "🔄 Deployment PR Created - Dev Environment"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*PR:*\n<${{ needs.update-manifests.outputs.pr_url }}|#${{ needs.update-manifests.outputs.pr_number }}>"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Image Tag:*\n`${{ github.sha }}`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Author:*\n${{ github.actor }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Status:*\nAwaiting auto-merge"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
-    # ============================================
-    # JOB 7: Notify on Failure
-    # ============================================
-    notify-failure:
-        name: Notify Failure
-        runs-on: ubuntu-latest
-        needs:
-            [
-                backend-test,
-                frontend-test,
-                build-backend,
-                build-frontend,
-                update-manifests,
-            ]
-        if: failure()
+  # ============================================
+  # JOB 7: Notify on Failure
+  # ============================================
+  notify-failure:
+    name: Notify Failure
+    runs-on: ubuntu-latest
+    needs:
+      [
+        backend-test,
+        frontend-test,
+        build-backend,
+        build-frontend,
+        update-manifests,
+      ]
+    if: failure()
 
-        steps:
-            - name: Send Slack notification - Failure
-              uses: slackapi/slack-github-action@v1.26.0
-              with:
-                  payload: |
-                      {
-                        "text": "❌ CI Pipeline failed!",
-                        "blocks": [
-                          {
-                            "type": "header",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "❌ CI Pipeline Failed"
-                            }
-                          },
-                          {
-                            "type": "section",
-                            "fields": [
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Repository:*\n${{ github.repository }}"
-                              },
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Branch:*\n${{ github.ref_name }}"
-                              },
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Commit:*\n`${{ github.sha }}`"
-                              },
-                              {
-                                "type": "mrkdwn",
-                                "text": "*Author:*\n${{ github.actor }}"
-                              }
-                            ]
-                          },
-                          {
-                            "type": "section",
-                            "text": {
-                              "type": "mrkdwn",
-                              "text": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔗 View Failed Run>"
-                            }
-                          }
-                        ]
-                      }
-              env:
-                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-                  SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+    steps:
+      - name: Send Slack notification - Failure
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "❌ CI Pipeline failed!",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "❌ CI Pipeline Failed"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Repository:*\n${{ github.repository }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Branch:*\n${{ github.ref_name }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit:*\n`${{ github.sha }}`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Author:*\n${{ github.actor }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔗 View Failed Run>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
