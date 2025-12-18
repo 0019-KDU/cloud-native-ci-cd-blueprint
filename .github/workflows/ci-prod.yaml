@@ -152,9 +152,19 @@ jobs:
           # Wait for checks to complete (GitOps validation)
           sleep 15
 
-          # Merge the PR directly
+          # Check if PR is already merged (manual merge)
+          PR_STATE=$(gh pr view ${{ steps.create-pr.outputs.pr_number }} --json state --jq '.state')
+
+          if [ "$PR_STATE" = "MERGED" ]; then
+            echo "✅ PR already merged manually - skipping auto-merge"
+            exit 0
+          fi
+
+          # Merge the PR if not already merged
           echo "🔀 Merging PR..."
-          gh pr merge ${{ steps.create-pr.outputs.pr_number }} --squash --auto
+          gh pr merge ${{ steps.create-pr.outputs.pr_number }} --squash --auto || {
+            echo "⚠️ Auto-merge may have already been enabled or PR is merging"
+          }
           echo "✅ PR merge initiated"
 
       - name: Wait for PR to merge
