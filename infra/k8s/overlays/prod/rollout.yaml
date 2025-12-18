@@ -15,6 +15,11 @@ spec:
         metadata:
             labels:
                 app: backend
+                app.kubernetes.io/component: api
+                app.kubernetes.io/name: ai-incident-assistant
+                app.kubernetes.io/part-of: incident-management
+                environment: production
+                managed-by: argocd
         spec:
             containers:
                 - name: backend
@@ -59,13 +64,13 @@ spec:
                           cpu: "500m"
                   readinessProbe:
                       httpGet:
-                          path: /api/health
+                          path: /health
                           port: 3001
                       initialDelaySeconds: 10
                       periodSeconds: 5
                   livenessProbe:
                       httpGet:
-                          path: /api/health
+                          path: /health
                           port: 3001
                       initialDelaySeconds: 15
                       periodSeconds: 10
@@ -135,12 +140,17 @@ spec:
         metadata:
             labels:
                 app: frontend
+                app.kubernetes.io/component: frontend
+                app.kubernetes.io/name: ai-incident-assistant
+                app.kubernetes.io/part-of: incident-management
+                environment: production
+                managed-by: argocd
         spec:
             containers:
                 - name: frontend
                   image: registry.digitalocean.com/ai-incident-assistant/frontend:latest
                   ports:
-                      - containerPort: 80
+                      - containerPort: 8080
                   resources:
                       requests:
                           memory: "128Mi"
@@ -151,13 +161,13 @@ spec:
                   readinessProbe:
                       httpGet:
                           path: /
-                          port: 80
+                          port: 8080
                       initialDelaySeconds: 5
                       periodSeconds: 5
                   livenessProbe:
                       httpGet:
                           path: /
-                          port: 80
+                          port: 8080
                       initialDelaySeconds: 10
                       periodSeconds: 10
     strategy:
