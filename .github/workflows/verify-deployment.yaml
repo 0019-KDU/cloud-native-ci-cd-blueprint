@@ -6,6 +6,12 @@ on:
       - main
     paths:
       - "infra/k8s/overlays/dev/**"
+  workflow_run:
+    workflows: ["Dev CI/CD"]
+    types:
+      - completed
+    branches:
+      - main
 
 permissions:
   contents: read
