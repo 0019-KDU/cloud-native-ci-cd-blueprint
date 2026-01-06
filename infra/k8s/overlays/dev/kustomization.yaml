@@ -85,6 +85,7 @@ configMapGenerator:
   name: backend-config
 
 # Image tags (will be updated by CI/CD pipeline)
+# Image tags (will be updated by CI/CD pipeline)
 images:
 - name: registry.digitalocean.com/ai-incident-assistant/backend
   newName: registry.digitalocean.com/ai-incident-assistant/backend
@@ -92,4 +93,3 @@ images:
 - name: registry.digitalocean.com/ai-incident-assistant/frontend
   newName: registry.digitalocean.com/ai-incident-assistant/frontend
   newTag: "80765f7b367142b59b9357479550c93da3580aa7"
-
