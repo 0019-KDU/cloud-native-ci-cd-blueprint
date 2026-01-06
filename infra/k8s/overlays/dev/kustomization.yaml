@@ -85,24 +85,11 @@ configMapGenerator:
   name: backend-config
 
 # Image tags (will be updated by CI/CD pipeline)
+# Image tags (will be updated by CI/CD pipeline)
 images:
 - name: registry.digitalocean.com/ai-incident-assistant/backend
   newName: registry.digitalocean.com/ai-incident-assistant/backend
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
   newTag: "80765f7b367142b59b9357479550c93da3580aa7"
 - name: registry.digitalocean.com/ai-incident-assistant/frontend
   newName: registry.digitalocean.com/ai-incident-assistant/frontend
   newTag: "80765f7b367142b59b9357479550c93da3580aa7"
-=======
-  newTag: "8e733224e5eb6afd607f3a1b16e3fdc822f853dd"
-- name: registry.digitalocean.com/ai-incident-assistant/frontend
-  newName: registry.digitalocean.com/ai-incident-assistant/frontend
-  newTag: "8e733224e5eb6afd607f3a1b16e3fdc822f853dd"
->>>>>>> Stashed changes
-=======
-  newTag: "8e733224e5eb6afd607f3a1b16e3fdc822f853dd"
-- name: registry.digitalocean.com/ai-incident-assistant/frontend
-  newName: registry.digitalocean.com/ai-incident-assistant/frontend
-  newTag: "8e733224e5eb6afd607f3a1b16e3fdc822f853dd"
->>>>>>> Stashed changes
