@@ -168,83 +168,13 @@ jobs:
           echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
 
   # ============================================
-  # JOB 3: Merge and Sync
-  # ============================================
-  merge-and-sync:
-    name: Merge and Trigger Sync
-    runs-on: ubuntu-latest
-    needs: [prepare, update-staging-manifests]
-    if: needs.prepare.outputs.needs_update == 'true'
-    environment:
-      name: staging
-      url: http://staging.174.138.120.13.nip.io
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Auto-merge staging PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Enable auto-merge
-          gh pr merge ${{ needs.update-staging-manifests.outputs.pr_number }} --auto --squash
-
-          echo "✅ Auto-merge enabled for PR #${{ needs.update-staging-manifests.outputs.pr_number }}"
-
-      - name: Install doctl
-        run: |
-          sudo snap install doctl
-          sudo snap connect doctl:kube-config
-          mkdir -p $HOME/.kube
-          doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-      - name: Save kubeconfig
-        run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
-
-      - name: Wait for PR merge
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "⏳ Waiting for PR to merge..."
-          for i in {1..30}; do
-            STATE=$(gh pr view ${{ needs.update-staging-manifests.outputs.pr_number }} --json state --jq '.state')
-            if [ "$STATE" = "MERGED" ]; then
-              echo "✅ PR merged!"
-              break
-            fi
-            echo "Waiting... ($i/30)"
-            sleep 10
-          done
-
-      - name: Trigger ArgoCD Sync (Manual)
-        run: |
-          echo "🔄 Triggering ArgoCD sync for staging..."
-
-          # Option 1: Using ArgoCD CLI
-          # argocd app sync ai-incident-staging --auth-token ${{ secrets.ARGOCD_TOKEN }}
-
-          # Option 2: Using kubectl to trigger sync
-          kubectl patch application ai-incident-staging -n argocd \
-            --type merge \
-            -p '{"operation": {"initiatedBy": {"username": "github-actions"}, "sync": {"revision": "HEAD"}}}' \
-            || echo "Manual sync may be required"
-
-      - name: Wait for rollout
-        run: |
-          echo "⏳ Waiting for staging deployment..."
-          kubectl rollout status deployment/backend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
-          kubectl rollout status deployment/frontend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
-          echo "✅ Staging deployment complete!"
-
-  # ============================================
-  # JOB 4: Run E2E Tests via Argo Workflow
+  # JOB 3: Run E2E Tests BEFORE Merge
   # ============================================
   e2e-tests:
     name: E2E Tests (Argo Workflow)
     runs-on: ubuntu-latest
-    needs: [prepare]
-    if: ${{ inputs.run_e2e_test != false }}
+    needs: [prepare, update-staging-manifests]
+    if: ${{ inputs.run_e2e_test != false && needs.prepare.outputs.needs_update == 'true' }}
 
     steps:
       - name: Checkout code
@@ -300,13 +230,13 @@ jobs:
           echo "✅ E2E tests passed!"
 
   # ============================================
-  # JOB 5: Run Load Tests via Argo Workflow
+  # JOB 4: Run Load Tests BEFORE Merge
   # ============================================
   load-tests:
     name: Load Tests (Argo Workflow)
     runs-on: ubuntu-latest
-    needs: [prepare, e2e-tests]
-    if: ${{ inputs.run_load_test != false && always() && needs.e2e-tests.result == 'success' }}
+    needs: [prepare, update-staging-manifests, e2e-tests]
+    if: ${{ inputs.run_load_test != false && needs.e2e-tests.result == 'success' && needs.prepare.outputs.needs_update == 'true' }}
 
     steps:
       - name: Checkout code
@@ -363,12 +293,99 @@ jobs:
           echo "✅ Load tests passed!"
 
   # ============================================
+  # JOB 5: Merge ONLY AFTER Tests Pass
+  # ============================================
+  merge-and-sync:
+    name: Merge and Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [prepare, update-staging-manifests, e2e-tests, load-tests]
+    if: needs.prepare.outputs.needs_update == 'true' && needs.e2e-tests.result == 'success' && (needs.load-tests.result == 'success' || needs.load-tests.result == 'skipped')
+    environment:
+      name: staging
+      url: http://staging.174.138.120.13.nip.io
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Post test results to PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ needs.update-staging-manifests.outputs.pr_number }}"
+
+          gh pr comment $PR_NUMBER --body "## ✅ All Tests Passed!
+
+          ### Test Results:
+          - ✅ E2E Tests: Passed
+          - ✅ Load Tests: ${{ needs.load-tests.result == 'success' && 'Passed' || 'Skipped' }}
+
+          **Manual approval required to merge and deploy to staging.**"
+
+          echo "✅ Test results posted to PR #$PR_NUMBER"
+          echo ""
+          echo "⏸️ Waiting for manual approval in GitHub environment: staging"
+
+      - name: Install doctl
+        run: |
+          sudo snap install doctl
+          sudo snap connect doctl:kube-config
+          mkdir -p $HOME/.kube
+          doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Save kubeconfig
+        run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
+
+      - name: Merge PR after approval
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ needs.update-staging-manifests.outputs.pr_number }}"
+
+          echo "✅ Manual approval received"
+          echo "🔀 Merging PR #$PR_NUMBER..."
+
+          gh pr merge $PR_NUMBER --squash
+
+          echo "✅ PR #$PR_NUMBER merged to main"
+
+      - name: Wait for PR merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "⏳ Waiting for PR to merge..."
+          for i in {1..30}; do
+            STATE=$(gh pr view ${{ needs.update-staging-manifests.outputs.pr_number }} --json state --jq '.state')
+            if [ "$STATE" = "MERGED" ]; then
+              echo "✅ PR merged!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 10
+          done
+
+      - name: Trigger ArgoCD Sync
+        run: |
+          echo "🔄 Triggering ArgoCD sync for staging..."
+          kubectl patch application ai-incident-staging -n argocd \
+            --type merge \
+            -p '{"operation": {"initiatedBy": {"username": "github-actions"}, "sync": {"revision": "HEAD"}}}' \
+            || echo "Manual sync may be required"
+
+      - name: Wait for rollout
+        run: |
+          echo "⏳ Waiting for staging deployment..."
+          kubectl rollout status deployment/backend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
+          kubectl rollout status deployment/frontend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
+          echo "✅ Staging deployment complete!"
+
+  # ============================================
   # JOB 6: Notify Results
   # ============================================
   notify:
     name: Notify Results
     runs-on: ubuntu-latest
-    needs: [prepare, e2e-tests, load-tests]
+    needs: [prepare, e2e-tests, load-tests, merge-and-sync]
     if: always()
 
     steps:
