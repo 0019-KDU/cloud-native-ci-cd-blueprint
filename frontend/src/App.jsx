@@ -29,7 +29,7 @@ function App() {
         <header className="app-header">
           <div className="header-content">
             <h1 className="app-title">AI Incident Assistant</h1>
-            <p className="app-subtitle">DevOps Incident Management with AI-Powered Analysis | v4.0</p>
+            <p className="app-subtitle">DevOps Incident Management with AI-Powered Analysis | v4.1</p>
           </div>
           <nav className="app-nav">
             <Link to="/" className="nav-link">Incidents</Link>

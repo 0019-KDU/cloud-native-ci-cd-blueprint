@@ -326,17 +326,14 @@ jobs:
           echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
           echo "✅ Created PR #$PR_NUMBER: $PR_URL"
 
-      - name: Add Labels and Request Review
+      - name: Notify PR Created
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUMBER=${{ steps.create-pr.outputs.pr_number }}
           PR_URL=${{ steps.create-pr.outputs.pr_url }}
 
-          # Add labels for tracking
-          gh pr edit $PR_NUMBER --add-label "gitops,automated,dev-deployment"
-
-          echo "✅ PR #$PR_NUMBER created and labeled"
+          echo "✅ PR #$PR_NUMBER created successfully"
           echo "📋 Manual approval required before merge"
           echo "🔗 Review PR: $PR_URL"
           echo ""
