@@ -83,16 +83,15 @@ jobs:
           fi
 
   # ============================================
-  # JOB 2: Update Staging Manifests
+  # JOB 2: Deploy to Staging (Merge and Sync)
   # ============================================
-  update-staging-manifests:
-    name: Update Staging Manifests
+  deploy-to-staging:
+    name: Deploy to Staging
     runs-on: ubuntu-latest
     needs: [prepare]
     if: needs.prepare.outputs.needs_update == 'true'
     outputs:
-      pr_number: ${{ steps.create-pr.outputs.pr_number }}
-      pr_url: ${{ steps.create-pr.outputs.pr_url }}
+      deployed: ${{ steps.deployment.outputs.deployed }}
 
     steps:
       - name: Checkout code
@@ -106,12 +105,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Create staging deployment branch
-        run: |
-          BRANCH_NAME="deploy/staging-${{ needs.prepare.outputs.image_tag }}"
-          git checkout -b $BRANCH_NAME
-          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
-
       - name: Update staging kustomization
         run: |
           cd infra/k8s/overlays/staging
@@ -120,61 +113,71 @@ jobs:
           echo "📝 Updated staging kustomization.yaml:"
           cat kustomization.yaml
 
-      - name: Commit and push
+      - name: Commit and push directly to main
         run: |
-          # Check if there are changes
-          if git diff --quiet infra/k8s/overlays/staging/kustomization.yaml; then
-            echo "⚠️ No changes detected - image tag is already ${{ needs.prepare.outputs.image_tag }}"
-            echo "Skipping PR creation as staging is already at this version"
-            echo "skip_pr=true" >> $GITHUB_ENV
-          else
-            git add infra/k8s/overlays/staging/kustomization.yaml
-            git commit -m "🚀 Deploy to staging: ${{ needs.prepare.outputs.image_tag }} [skip ci]"
-            git push origin ${{ env.BRANCH_NAME }}
-            echo "skip_pr=false" >> $GITHUB_ENV
-          fi
+          git add infra/k8s/overlays/staging/kustomization.yaml
+          git commit -m "🚀 Deploy to staging: ${{ needs.prepare.outputs.image_tag }}"
+          git push origin main
 
-      - name: Create Pull Request
-        if: env.skip_pr != 'true'
-        id: create-pr
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "✅ Pushed changes directly to main"
+
+      - name: Install doctl
         run: |
-          PR_URL=$(gh pr create \
-            --title "🎭 Deploy to Staging: ${{ needs.prepare.outputs.image_tag }}" \
-            --body "## Staging Deployment
+          sudo snap install doctl
+          sudo snap connect doctl:kube-config
+          mkdir -p $HOME/.kube
+          doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-          ### 📦 Image Tag
-          \`${{ needs.prepare.outputs.image_tag }}\`
+      - name: Save kubeconfig
+        run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
 
-          ### 🧪 Tests to Run
-          - E2E Tests: ${{ inputs.run_e2e_test && '✅ Yes' || '⏭️ Skipped' }}
-          - Load Tests: ${{ inputs.run_load_test && '✅ Yes' || '⏭️ Skipped' }}
+      - name: Trigger ArgoCD Sync
+        run: |
+          echo "🔄 Triggering ArgoCD sync for staging..."
+          kubectl patch application ai-incident-staging -n argocd \
+            --type merge \
+            -p '{"operation": {"initiatedBy": {"username": "github-actions"}, "sync": {"revision": "HEAD"}}}' \
+            || echo "⚠️ ArgoCD sync triggered"
 
-          ### ⚡ What happens next?
-          1. This PR merges after approval
-          2. ArgoCD syncs to staging (manual sync required)
-          3. Argo Workflow runs E2E and Load tests
-          4. Slack notification on completion
+      - name: Wait for ArgoCD sync
+        run: |
+          echo "⏳ Waiting for ArgoCD to sync..."
+          for i in {1..30}; do
+            SYNC_STATUS=$(kubectl get app ai-incident-staging -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+            HEALTH_STATUS=$(kubectl get app ai-incident-staging -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+            
+            echo "Attempt $i/30 - Sync: $SYNC_STATUS, Health: $HEALTH_STATUS"
+            
+            if [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ]; then
+              echo "✅ ArgoCD sync complete and healthy!"
+              break
+            fi
+            
+            sleep 10
+          done
 
-          ---
-          *🤖 Triggered by: @${{ github.actor }}*" \
-            --base main \
-            --head ${{ env.BRANCH_NAME }})
+      - name: Wait for deployment rollout
+        id: deployment
+        run: |
+          echo "⏳ Waiting for staging deployment to complete..."
+          kubectl rollout status deployment/backend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
+          kubectl rollout status deployment/frontend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
 
-          PR_NUMBER=$(gh pr list --head ${{ env.BRANCH_NAME }} --json number --jq '.[0].number')
+          echo "✅ Staging deployment complete!"
+          echo "deployed=true" >> $GITHUB_OUTPUT
 
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+          echo ""
+          echo "🌐 Staging URL: http://staging.174.138.120.13.nip.io"
+          echo "📦 Image Tag: ${{ needs.prepare.outputs.image_tag }}"
 
   # ============================================
-  # JOB 3: Run E2E Tests BEFORE Merge
+  # JOB 3: Run E2E Tests AFTER Deployment
   # ============================================
   e2e-tests:
     name: E2E Tests (Argo Workflow)
     runs-on: ubuntu-latest
-    needs: [prepare, update-staging-manifests]
-    if: ${{ inputs.run_e2e_test != false && needs.prepare.outputs.needs_update == 'true' }}
+    needs: [prepare, deploy-to-staging]
+    if: ${{ inputs.run_e2e_test != false && needs.deploy-to-staging.outputs.deployed == 'true' }}
 
     steps:
       - name: Checkout code
@@ -230,13 +233,13 @@ jobs:
           echo "✅ E2E tests passed!"
 
   # ============================================
-  # JOB 4: Run Load Tests BEFORE Merge
+  # JOB 4: Run Load Tests AFTER E2E Tests
   # ============================================
   load-tests:
     name: Load Tests (Argo Workflow)
     runs-on: ubuntu-latest
-    needs: [prepare, update-staging-manifests, e2e-tests]
-    if: ${{ inputs.run_load_test != false && needs.e2e-tests.result == 'success' && needs.prepare.outputs.needs_update == 'true' }}
+    needs: [prepare, deploy-to-staging, e2e-tests]
+    if: ${{ inputs.run_load_test != false && needs.e2e-tests.result == 'success' && needs.deploy-to-staging.outputs.deployed == 'true' }}
 
     steps:
       - name: Checkout code
@@ -293,104 +296,17 @@ jobs:
           echo "✅ Load tests passed!"
 
   # ============================================
-  # JOB 5: Merge ONLY AFTER Tests Pass
-  # ============================================
-  merge-and-sync:
-    name: Merge and Deploy to Staging
-    runs-on: ubuntu-latest
-    needs: [prepare, update-staging-manifests, e2e-tests, load-tests]
-    if: needs.prepare.outputs.needs_update == 'true' && needs.e2e-tests.result == 'success' && (needs.load-tests.result == 'success' || needs.load-tests.result == 'skipped')
-    environment:
-      name: staging
-      url: http://staging.174.138.120.13.nip.io
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Post test results to PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PR_NUMBER="${{ needs.update-staging-manifests.outputs.pr_number }}"
-
-          gh pr comment $PR_NUMBER --body "## ✅ All Tests Passed!
-
-          ### Test Results:
-          - ✅ E2E Tests: Passed
-          - ✅ Load Tests: ${{ needs.load-tests.result == 'success' && 'Passed' || 'Skipped' }}
-
-          **Manual approval required to merge and deploy to staging.**"
-
-          echo "✅ Test results posted to PR #$PR_NUMBER"
-          echo ""
-          echo "⏸️ Waiting for manual approval in GitHub environment: staging"
-
-      - name: Install doctl
-        run: |
-          sudo snap install doctl
-          sudo snap connect doctl:kube-config
-          mkdir -p $HOME/.kube
-          doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-      - name: Save kubeconfig
-        run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
-
-      - name: Merge PR after approval
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PR_NUMBER="${{ needs.update-staging-manifests.outputs.pr_number }}"
-
-          echo "✅ Manual approval received"
-          echo "🔀 Merging PR #$PR_NUMBER..."
-
-          gh pr merge $PR_NUMBER --squash
-
-          echo "✅ PR #$PR_NUMBER merged to main"
-
-      - name: Wait for PR merge
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "⏳ Waiting for PR to merge..."
-          for i in {1..30}; do
-            STATE=$(gh pr view ${{ needs.update-staging-manifests.outputs.pr_number }} --json state --jq '.state')
-            if [ "$STATE" = "MERGED" ]; then
-              echo "✅ PR merged!"
-              break
-            fi
-            echo "Waiting... ($i/30)"
-            sleep 10
-          done
-
-      - name: Trigger ArgoCD Sync
-        run: |
-          echo "🔄 Triggering ArgoCD sync for staging..."
-          kubectl patch application ai-incident-staging -n argocd \
-            --type merge \
-            -p '{"operation": {"initiatedBy": {"username": "github-actions"}, "sync": {"revision": "HEAD"}}}' \
-            || echo "Manual sync may be required"
-
-      - name: Wait for rollout
-        run: |
-          echo "⏳ Waiting for staging deployment..."
-          kubectl rollout status deployment/backend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
-          kubectl rollout status deployment/frontend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
-          echo "✅ Staging deployment complete!"
-
-  # ============================================
-  # JOB 6: Notify Results
+  # JOB 5: Notify Results
   # ============================================
   notify:
     name: Notify Results
     runs-on: ubuntu-latest
-    needs: [prepare, e2e-tests, load-tests, merge-and-sync]
+    needs: [prepare, deploy-to-staging, e2e-tests, load-tests]
     if: always()
 
     steps:
       - name: Send Slack - Success
-        if: ${{ needs.e2e-tests.result == 'success' && (needs.load-tests.result == 'success' || needs.load-tests.result == 'skipped') }}
+        if: ${{ needs.deploy-to-staging.outputs.deployed == 'true' && needs.e2e-tests.result == 'success' && (needs.load-tests.result == 'success' || needs.load-tests.result == 'skipped') }}
         uses: slackapi/slack-github-action@v1.26.0
         with:
           payload: |
@@ -401,7 +317,7 @@ jobs:
                   "type": "header",
                   "text": {
                     "type": "plain_text",
-                    "text": "✅ Staging Deployment Complete"
+                    "text": "✅ Staging Deployment & Tests Complete"
                   }
                 },
                 {
@@ -414,6 +330,10 @@ jobs:
                     {
                       "type": "mrkdwn",
                       "text": "*Triggered by:*\n${{ github.actor }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Deployment:*\n✅ Successful"
                     },
                     {
                       "type": "mrkdwn",
@@ -439,7 +359,7 @@ jobs:
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
       - name: Send Slack - Failure
-        if: ${{ needs.e2e-tests.result == 'failure' || needs.load-tests.result == 'failure' }}
+        if: ${{ needs.deploy-to-staging.result == 'failure' || needs.e2e-tests.result == 'failure' || needs.load-tests.result == 'failure' }}
         uses: slackapi/slack-github-action@v1.26.0
         with:
           payload: |
@@ -450,7 +370,7 @@ jobs:
                   "type": "header",
                   "text": {
                     "type": "plain_text",
-                    "text": "❌ Staging Deployment Failed"
+                    "text": "❌ Staging Deployment or Tests Failed"
                   }
                 },
                 {
@@ -459,6 +379,10 @@ jobs:
                     {
                       "type": "mrkdwn",
                       "text": "*Image Tag:*\n`${{ needs.prepare.outputs.image_tag }}`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Deployment:*\n${{ needs.deploy-to-staging.result }}"
                     },
                     {
                       "type": "mrkdwn",
