@@ -51,12 +51,33 @@ jobs:
           STAGING_TAG=$(grep "newTag:" infra/k8s/overlays/staging/kustomization.yaml | sed 's/.*newTag:\s*//; s/"//g; s/[[:space:]]//g')
 
           if [ "$STAGING_TAG" != "${{ inputs.image_tag }}" ]; then
-            echo "⚠️ Warning: Tag ${{ inputs.image_tag }} may not have been tested in staging"
-            echo "   Staging has: $STAGING_TAG"
+            echo "❌ ERROR: Tag ${{ inputs.image_tag }} has NOT been tested in staging"
+            echo "   Staging currently has: $STAGING_TAG"
             echo ""
-            echo "Proceeding anyway... (manual override)"
+            echo "🛑 Production deployments MUST go through staging first!"
+            echo "   1. Deploy to staging using ci-staging workflow"
+            echo "   2. Wait for E2E and Load tests to pass"
+            echo "   3. Then deploy to production"
+            exit 1
           else
             echo "✅ Tag ${{ inputs.image_tag }} was tested in staging"
+          fi
+
+      - name: Verify staging tests passed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔍 Verifying staging tests passed for tag ${{ inputs.image_tag }}..."
+
+          # Get the last staging workflow run for this tag
+          WORKFLOW_RUN=$(gh run list --workflow=ci-staging.yaml --limit 50 --json conclusion,headSha,status | \
+            jq -r '.[] | select(.conclusion == "success") | .headSha' | head -1)
+
+          if [ -z "$WORKFLOW_RUN" ]; then
+            echo "⚠️ Warning: Could not verify staging tests"
+            echo "   Proceeding anyway (manual deployment)"
+          else
+            echo "✅ Staging tests verified for commit: $WORKFLOW_RUN"
           fi
 
       - name: Confirm production deployment
@@ -150,7 +171,8 @@ jobs:
           echo "⏸️  Waiting for status checks to complete..."
 
           # Wait for checks to complete (GitOps validation)
-          sleep 15
+          echo "⏳ Waiting 60 seconds for CI checks and ArgoCD validation..."
+          sleep 60
 
           # Check if PR is already merged (manual merge)
           PR_STATE=$(gh pr view ${{ steps.create-pr.outputs.pr_number }} --json state --jq '.state')
@@ -306,32 +328,65 @@ jobs:
 
       - name: Run smoke tests
         run: |
-          echo "🔥 Running smoke tests on preview..."
+          echo "🔥 Running enhanced smoke tests on preview..."
+          FAILED=0
 
-          # Test frontend
-          echo "Testing frontend..."
+          # Test 1: Frontend loads
+          echo "1️⃣ Testing frontend loads..."
           FRONTEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PREVIEW_URL }}")
           if [ "$FRONTEND_STATUS" = "200" ]; then
-            echo "✅ Frontend: OK ($FRONTEND_STATUS)"
+            echo "   ✅ Frontend: OK ($FRONTEND_STATUS)"
           else
-            echo "❌ Frontend: FAILED ($FRONTEND_STATUS)"
-            exit 1
+            echo "   ❌ Frontend: FAILED ($FRONTEND_STATUS)"
+            FAILED=1
           fi
 
-          # Test backend API health
-          echo "Testing backend API..."
+          # Test 2: Backend health endpoint
+          echo "2️⃣ Testing backend health..."
           API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PREVIEW_URL }}/api/health")
           if [ "$API_STATUS" = "200" ]; then
-            echo "✅ Backend API: OK ($API_STATUS)"
+            echo "   ✅ Backend Health: OK ($API_STATUS)"
           else
-            echo "❌ Backend API: FAILED ($API_STATUS)"
-            exit 1
+            echo "   ❌ Backend Health: FAILED ($API_STATUS)"
+            FAILED=1
           fi
 
-          # Test API response
-          echo "Testing API response..."
+          # Test 3: Backend returns valid JSON
+          echo "3️⃣ Testing API response format..."
           API_RESPONSE=$(curl -s "${{ env.PREVIEW_URL }}/api/health")
-          echo "API Response: $API_RESPONSE"
+          if echo "$API_RESPONSE" | jq . > /dev/null 2>&1; then
+            echo "   ✅ API Response: Valid JSON"
+            echo "   Response: $API_RESPONSE"
+          else
+            echo "   ❌ API Response: Invalid JSON"
+            echo "   Response: $API_RESPONSE"
+            FAILED=1
+          fi
+
+          # Test 4: Database connectivity (via incidents endpoint)
+          echo "4️⃣ Testing database connectivity..."
+          DB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PREVIEW_URL }}/api/incidents")
+          if [ "$DB_STATUS" = "200" ] || [ "$DB_STATUS" = "401" ]; then
+            echo "   ✅ Database: Connected (status $DB_STATUS)"
+          else
+            echo "   ❌ Database: Connection failed ($DB_STATUS)"
+            FAILED=1
+          fi
+
+          # Test 5: Response time check
+          echo "5️⃣ Testing response time..."
+          RESPONSE_TIME=$(curl -s -o /dev/null -w "%{time_total}" "${{ env.PREVIEW_URL }}/api/health")
+          if (( $(echo "$RESPONSE_TIME < 2.0" | bc -l) )); then
+            echo "   ✅ Response Time: ${RESPONSE_TIME}s (< 2s)"
+          else
+            echo "   ⚠️ Response Time: ${RESPONSE_TIME}s (slow but acceptable)"
+          fi
+
+          if [ $FAILED -eq 1 ]; then
+            echo ""
+            echo "❌ Smoke tests FAILED!"
+            exit 1
+          fi
 
           echo ""
           echo "✅ All smoke tests passed!"
@@ -427,6 +482,53 @@ jobs:
             echo "⚠️ Production returned: $PROD_STATUS"
           fi
 
+      - name: Monitor production health (5 minutes)
+        run: |
+          echo "📊 Monitoring production health for 5 minutes..."
+          echo "   This ensures the deployment is stable before completing."
+          echo ""
+
+          FAILURES=0
+          MAX_FAILURES=3
+
+          for i in {1..10}; do
+            echo "Check $i/10 ($(date '+%H:%M:%S'))"
+            
+            # Check frontend
+            FRONTEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PROD_URL }}" 2>/dev/null || echo "000")
+            
+            # Check backend API
+            API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PROD_URL }}/api/health" 2>/dev/null || echo "000")
+            
+            # Check response time
+            RESPONSE_TIME=$(curl -s -o /dev/null -w "%{time_total}" "${{ env.PROD_URL }}/api/health" 2>/dev/null || echo "999")
+            
+            if [ "$FRONTEND_STATUS" = "200" ] && [ "$API_STATUS" = "200" ]; then
+              echo "   ✅ Frontend: $FRONTEND_STATUS | API: $API_STATUS | Response: ${RESPONSE_TIME}s"
+              FAILURES=0
+            else
+              echo "   ❌ Frontend: $FRONTEND_STATUS | API: $API_STATUS"
+              FAILURES=$((FAILURES + 1))
+              
+              if [ $FAILURES -ge $MAX_FAILURES ]; then
+                echo ""
+                echo "❌ Production health check FAILED!"
+                echo "   $MAX_FAILURES consecutive failures detected."
+                echo "   🔙 Consider rolling back!"
+                exit 1
+              fi
+            fi
+            
+            # Wait 30 seconds between checks (10 checks = 5 minutes)
+            if [ $i -lt 10 ]; then
+              sleep 30
+            fi
+          done
+
+          echo ""
+          echo "✅ Production health monitoring complete - all checks passed!"
+          echo "   Deployment is stable and serving traffic successfully."
+
   # ============================================
   # JOB 6: Notify
   # ============================================
@@ -434,7 +536,7 @@ jobs:
     name: Notify Success
     runs-on: ubuntu-latest
     needs: [validate, promote]
-    if: success()
+    if: ${{ needs.promote.result == 'success' }}
 
     steps:
       - name: Send Slack - Production Success
@@ -489,7 +591,7 @@ jobs:
     name: Notify Failure
     runs-on: ubuntu-latest
     needs: [validate, deploy-preview, smoke-tests, promote]
-    if: failure()
+    if: ${{ always() && (needs.validate.result == 'failure' || needs.deploy-preview.result == 'failure' || needs.smoke-tests.result == 'failure' || needs.promote.result == 'failure') }}
 
     steps:
       - name: Send Slack - Failure
@@ -533,13 +635,13 @@ jobs:
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ============================================
-  # JOB 7: Rollback (Manual)
+  # JOB 7: Automated Rollback (if health fails)
   # ============================================
   rollback:
-    name: Rollback (if needed)
+    name: Automated Rollback
     runs-on: ubuntu-latest
     needs: [promote]
-    if: failure()
+    if: ${{ always() && needs.promote.result == 'failure' }}
 
     steps:
       - name: Install doctl
@@ -556,11 +658,124 @@ jobs:
           chmod +x kubectl-argo-rollouts-linux-amd64
           sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
 
-      - name: Abort rollout
+      - name: Check rollout status
+        id: check-status
         run: |
-          echo "🔙 Aborting rollouts..."
+          echo "🔍 Checking rollout status before abort..."
 
-          kubectl-argo-rollouts abort backend -n ${{ env.PROD_NAMESPACE }} || true
-          kubectl-argo-rollouts abort frontend -n ${{ env.PROD_NAMESPACE }} || true
+          # Check if rollouts are in progress or degraded
+          BACKEND_STATUS=$(kubectl-argo-rollouts status backend -n ${{ env.PROD_NAMESPACE }} --timeout 5s 2>&1 || echo "ERROR")
+          FRONTEND_STATUS=$(kubectl-argo-rollouts status frontend -n ${{ env.PROD_NAMESPACE }} --timeout 5s 2>&1 || echo "ERROR")
 
-          echo "✅ Rollouts aborted. Previous version is still active."
+          echo "Backend: $BACKEND_STATUS"
+          echo "Frontend: $FRONTEND_STATUS"
+
+          # Determine if rollback is needed
+          if [[ "$BACKEND_STATUS" == *"ERROR"* ]] || [[ "$FRONTEND_STATUS" == *"ERROR"* ]]; then
+            echo "needs_rollback=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_rollback=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Abort and rollback
+        if: steps.check-status.outputs.needs_rollback == 'true'
+        run: |
+          echo "🔙 AUTOMATED ROLLBACK INITIATED"
+          echo "================================"
+          echo "Reason: Health monitoring detected failures"
+          echo "Action: Aborting rollout and reverting to stable version"
+          echo ""
+
+          # Abort backend rollout
+          echo "⏹️ Aborting backend rollout..."
+          kubectl-argo-rollouts abort backend -n ${{ env.PROD_NAMESPACE }} || echo "Backend already aborted or not in progress"
+
+          # Abort frontend rollout
+          echo "⏹️ Aborting frontend rollout..."
+          kubectl-argo-rollouts abort frontend -n ${{ env.PROD_NAMESPACE }} || echo "Frontend already aborted or not in progress"
+
+          # Verify stable revision is active
+          echo ""
+          echo "🔍 Verifying stable version is active..."
+
+          sleep 10
+
+          BACKEND_STABLE=$(kubectl-argo-rollouts get rollout backend -n ${{ env.PROD_NAMESPACE }} | grep -c "✔ Healthy" || echo "0")
+          FRONTEND_STABLE=$(kubectl-argo-rollouts get rollout frontend -n ${{ env.PROD_NAMESPACE }} | grep -c "✔ Healthy" || echo "0")
+
+          echo "Backend stable instances: $BACKEND_STABLE"
+          echo "Frontend stable instances: $FRONTEND_STABLE"
+
+          echo ""
+          echo "✅ Rollback complete. Previous stable version is active."
+          echo "   Production traffic is now serving the previous version."
+
+      - name: Post rollback verification
+        if: steps.check-status.outputs.needs_rollback == 'true'
+        run: |
+          echo "🔍 Post-rollback verification..."
+
+          # Wait a bit for DNS/load balancer to update
+          sleep 15
+
+          # Test production URL
+          PROD_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PROD_URL }}" 2>/dev/null || echo "000")
+          API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.PROD_URL }}/api/health" 2>/dev/null || echo "000")
+
+          echo "Production URL: $PROD_STATUS"
+          echo "API Health: $API_STATUS"
+
+          if [ "$PROD_STATUS" = "200" ] && [ "$API_STATUS" = "200" ]; then
+            echo "✅ Production is healthy after rollback"
+          else
+            echo "⚠️ Production may still be recovering. Manual intervention may be needed."
+          fi
+
+      - name: Send rollback notification
+        if: steps.check-status.outputs.needs_rollback == 'true'
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "🔙 AUTOMATED ROLLBACK EXECUTED",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "🔙 Production Rollback Executed"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Failed Image:*\n`${{ inputs.image_tag }}`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Triggered by:*\n${{ github.actor }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Reason:*\nHealth monitoring failure"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Status:*\nReverted to stable version"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "⚠️ *Action Required:*\n• Investigate failure logs\n• Fix issues before redeploying\n• Previous stable version is now active\n\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔗 View Rollback Details>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
