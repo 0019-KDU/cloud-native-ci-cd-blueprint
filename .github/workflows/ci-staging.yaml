@@ -282,6 +282,17 @@ jobs:
         with:
           ref: ${{ needs.create-pr.outputs.commit_sha }}
 
+      - name: Install tools
+        run: |
+          # Install yq for manifest manipulation
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+          # Install kubectl
+          sudo snap install kubectl --classic
+          kubectl version --client
+
       - name: Install doctl
         uses: digitalocean/action-doctl@v2
         with:
@@ -355,15 +366,19 @@ jobs:
           # Temporarily modify namespace in kustomization for preview
           cd infra/k8s/overlays/staging
 
+          # Show original namespace
+          echo "Original namespace:"
+          grep "^namespace:" kustomization.yaml
+
           # Create a temporary kustomization with preview namespace
           cp kustomization.yaml kustomization.yaml.backup
 
-          # Replace the staging namespace with preview namespace
-          sed -i 's/^namespace: staging$/namespace: '"$TARGET_NS"'/' kustomization.yaml
+          # Update namespace using yq (reliably modifies YAML)
+          yq eval ".namespace = \"$TARGET_NS\"" -i kustomization.yaml
 
           # Verify the change
-          echo "Modified kustomization namespace to:"
-          grep "^namespace:" kustomization.yaml || echo "WARNING: namespace line not found!"
+          echo "Modified namespace to:"
+          grep "^namespace:" kustomization.yaml
 
           # Build manifests
           kubectl kustomize . > /tmp/preview-manifests.yaml
