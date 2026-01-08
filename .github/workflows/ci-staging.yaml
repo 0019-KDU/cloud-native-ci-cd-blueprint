@@ -827,27 +827,36 @@ jobs:
 
           echo "🔄 Syncing ArgoCD app: $APP"
 
-          # Force hard refresh
+          # Force hard refresh to detect changes
           kubectl patch application "$APP" -n argocd --type merge \
             -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}' || true
 
           sleep 5
 
-          # Wait for sync
+          # Trigger explicit sync operation
+          echo "🚀 Triggering sync operation..."
+          kubectl patch application "$APP" -n argocd --type merge \
+            -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"HEAD","prune":true,"syncOptions":["CreateNamespace=false"]}}}' || true
+
+          sleep 5
+
+          # Wait for sync to complete
           echo "⏳ Waiting for sync to complete..."
           for i in {1..60}; do
             SYNC="$(kubectl get app "$APP" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")"
             HEALTH="$(kubectl get app "$APP" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")"
+            OPERATION="$(kubectl get app "$APP" -n argocd -o jsonpath='{.operation}' 2>/dev/null || echo "")"
 
-            echo "[$i/60] Sync=$SYNC Health=$HEALTH"
+            echo "[$i/60] Sync=$SYNC Health=$HEALTH Operation=$([[ -z "$OPERATION" ]] && echo "None" || echo "InProgress")"
 
-            if [[ "$SYNC" == "Synced" && "$HEALTH" == "Healthy" ]]; then
+            if [[ "$SYNC" == "Synced" && "$HEALTH" == "Healthy" && -z "$OPERATION" ]]; then
               echo "✅ Main staging app synced & healthy!"
               exit 0
             fi
 
             if [[ $i -eq 60 ]]; then
               echo "❌ Timeout waiting for sync"
+              echo "Current application status:"
               kubectl get app "$APP" -n argocd -o yaml || true
               exit 1
             fi
