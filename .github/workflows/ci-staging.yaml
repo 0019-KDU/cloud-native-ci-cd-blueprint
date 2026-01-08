@@ -438,15 +438,16 @@ jobs:
           echo "⏳ Waiting for deployments to be created in $NS..."
 
           for i in {1..60}; do
-            BACKEND_EXISTS=$(kubectl get deployment backend -n "$NS" 2>/dev/null && echo "true" || echo "false")
-            FRONTEND_EXISTS=$(kubectl get deployment frontend -n "$NS" 2>/dev/null && echo "true" || echo "false")
-            POSTGRES_EXISTS=$(kubectl get statefulset postgres -n "$NS" 2>/dev/null && echo "true" || echo "false")
+            # Check if resources exist (returns 0 if exists, 1 if not)
+            kubectl get deployment backend -n "$NS" >/dev/null 2>&1 && BACKEND_EXISTS="true" || BACKEND_EXISTS="false"
+            kubectl get deployment frontend -n "$NS" >/dev/null 2>&1 && FRONTEND_EXISTS="true" || FRONTEND_EXISTS="false"
+            kubectl get statefulset postgres -n "$NS" >/dev/null 2>&1 && POSTGRES_EXISTS="true" || POSTGRES_EXISTS="false"
 
             echo "[$i/60] Backend=$BACKEND_EXISTS Frontend=$FRONTEND_EXISTS Postgres=$POSTGRES_EXISTS"
 
             if [[ "$BACKEND_EXISTS" == "true" && "$FRONTEND_EXISTS" == "true" && "$POSTGRES_EXISTS" == "true" ]]; then
               echo "✅ All resources created!"
-              break
+              exit 0
             fi
 
             if [[ $i -eq 60 ]]; then
