@@ -282,6 +282,17 @@ jobs:
         with:
           ref: ${{ needs.create-pr.outputs.commit_sha }}
 
+      - name: Install tools
+        run: |
+          # Install yq for manifest manipulation
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+          # Install kubectl
+          sudo snap install kubectl --classic
+          kubectl version --client
+
       - name: Install doctl
         uses: digitalocean/action-doctl@v2
         with:
@@ -352,14 +363,22 @@ jobs:
 
           echo "🏗️ Building manifests for preview environment..."
 
-          # Temporarily add namespace to kustomization for preview
+          # Temporarily modify namespace in kustomization for preview
           cd infra/k8s/overlays/staging
+
+          # Show original namespace
+          echo "Original namespace:"
+          grep "^namespace:" kustomization.yaml
 
           # Create a temporary kustomization with preview namespace
           cp kustomization.yaml kustomization.yaml.backup
 
-          # Uncomment and set the namespace
-          sed -i 's/# namespace: staging/namespace: '"$TARGET_NS"'/' kustomization.yaml
+          # Update namespace using yq (reliably modifies YAML)
+          yq eval ".namespace = \"$TARGET_NS\"" -i kustomization.yaml
+
+          # Verify the change
+          echo "Modified namespace to:"
+          grep "^namespace:" kustomization.yaml
 
           # Build manifests
           kubectl kustomize . > /tmp/preview-manifests.yaml
@@ -369,8 +388,32 @@ jobs:
 
           cd -
 
+          # Show summary of what will be applied
+          echo "Resources to be applied:"
+          grep -E "^kind:|^  name:|^  namespace:" /tmp/preview-manifests.yaml | head -20
+
+          # Check manifest file size
+          MANIFEST_SIZE=$(wc -l /tmp/preview-manifests.yaml | awk '{print $1}')
+          echo "Manifest file has $MANIFEST_SIZE lines"
+
+          if [[ $MANIFEST_SIZE -lt 10 ]]; then
+            echo "❌ ERROR: Manifest file seems empty or too small!"
+            cat /tmp/preview-manifests.yaml
+            exit 1
+          fi
+
           # Apply to preview namespace
+          echo "Applying manifests to $TARGET_NS..."
+          kubectl apply -f /tmp/preview-manifests.yaml --validate=true --dry-run=client || {
+            echo "❌ Dry-run validation failed!"
+            exit 1
+          }
+
           kubectl apply -f /tmp/preview-manifests.yaml
+
+          # Verify resources were created
+          echo "Verifying resources in $TARGET_NS:"
+          kubectl get all -n "$TARGET_NS" || echo "WARNING: No resources found yet"
 
           echo "✅ Manifests applied to $TARGET_NS"
 
