@@ -289,8 +289,30 @@ jobs:
         shell: bash
         run: |
           NS="${{ steps.deploy.outputs.preview_ns }}"
+
+          echo "🔍 Checking resources in namespace $NS..."
+          kubectl get all -n "$NS" || echo "Namespace might be empty"
+
+          # Wait for deployments to exist
+          echo "⏳ Waiting for deployments to be created..."
+          for i in {1..30}; do
+            BACKEND_EXISTS=$(kubectl get deployment backend -n "$NS" 2>/dev/null && echo "true" || echo "false")
+            FRONTEND_EXISTS=$(kubectl get deployment frontend -n "$NS" 2>/dev/null && echo "true" || echo "false")
+            
+            if [ "$BACKEND_EXISTS" = "true" ] && [ "$FRONTEND_EXISTS" = "true" ]; then
+              echo "✅ Deployments found!"
+              break
+            fi
+            
+            echo "[$i/30] Waiting for deployments to be created..."
+            sleep 5
+          done
+
+          # Now check rollout status
           kubectl rollout status deployment/backend -n "$NS" --timeout=${{ env.DEPLOYMENT_TIMEOUT }}
           kubectl rollout status deployment/frontend -n "$NS" --timeout=${{ env.DEPLOYMENT_TIMEOUT }}
+
+          echo "✅ Preview deployment ready!"
 
       - name: Update PR with preview status
         env:
