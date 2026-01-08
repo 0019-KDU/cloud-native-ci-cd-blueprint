@@ -89,7 +89,7 @@ configMapGenerator:
 images:
 - name: registry.digitalocean.com/ai-incident-assistant/backend
   newName: registry.digitalocean.com/ai-incident-assistant/backend
-  newTag: "84322a74b498be3526d15a28da039ddb463d46d2"
+  newTag: "e3beb0e6af66e6515f4cd1581d987cc25824e728"
 - name: registry.digitalocean.com/ai-incident-assistant/frontend
   newName: registry.digitalocean.com/ai-incident-assistant/frontend
-  newTag: "84322a74b498be3526d15a28da039ddb463d46d2"
+  newTag: "e3beb0e6af66e6515f4cd1581d987cc25824e728"
