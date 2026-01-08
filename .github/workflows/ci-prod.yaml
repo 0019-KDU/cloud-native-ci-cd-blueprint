@@ -488,6 +488,11 @@ jobs:
           echo "   This ensures the deployment is stable before completing."
           echo ""
 
+          echo "⏳ Waiting 60 seconds for application warmup..."
+          sleep 60
+          echo "✅ Warmup complete, starting health checks..."
+          echo ""
+
           FAILURES=0
           MAX_FAILURES=3
 
