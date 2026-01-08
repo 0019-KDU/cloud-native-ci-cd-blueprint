@@ -7,8 +7,9 @@ kind: Kustomization
 resources:
 - ../../base
 
-# Target namespace
-namespace: staging
+# Target namespace - controlled by ArgoCD Application destination
+# Removed hardcoded namespace to support preview deployments
+# namespace: staging
 
 # Common labels for staging environment
 commonLabels:
