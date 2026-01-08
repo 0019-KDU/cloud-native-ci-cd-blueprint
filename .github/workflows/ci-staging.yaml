@@ -601,17 +601,20 @@ jobs:
         run: |
           echo "🧪 Starting E2E tests..."
 
+          # Submit workflow and get name (without logs)
           WORKFLOW_NAME="$(argo submit infra/argo-workflows/e2e-tests.yaml \
             -n argo \
             --parameter image_tag=${{ needs.prepare.outputs.image_tag }} \
             --parameter target_url=${{ needs.deploy-preview.outputs.preview_url }} \
             --parameter namespace=${{ needs.deploy-preview.outputs.preview_ns }} \
-            --wait \
-            --log \
             -o name)"
 
           echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
           echo "✅ E2E workflow: $WORKFLOW_NAME"
+
+          # Wait for workflow and stream logs separately
+          argo wait "$WORKFLOW_NAME" -n argo
+          argo logs "$WORKFLOW_NAME" -n argo
 
       - name: Check E2E result
         if: always()
@@ -703,6 +706,7 @@ jobs:
           echo "  Duration: ${{ env.LOAD_TEST_DURATION }}"
           echo "  Users: ${{ env.LOAD_TEST_USERS }}"
 
+          # Submit workflow and get name (without logs)
           WORKFLOW_NAME="$(argo submit infra/argo-workflows/load-tests.yaml \
             -n argo \
             --parameter image_tag=${{ needs.prepare.outputs.image_tag }} \
@@ -710,12 +714,14 @@ jobs:
             --parameter namespace=${{ needs.deploy-preview.outputs.preview_ns }} \
             --parameter duration=${{ env.LOAD_TEST_DURATION }} \
             --parameter users=${{ env.LOAD_TEST_USERS }} \
-            --wait \
-            --log \
             -o name)"
 
           echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
           echo "✅ Load test workflow: $WORKFLOW_NAME"
+
+          # Wait for workflow and stream logs separately
+          argo wait "$WORKFLOW_NAME" -n argo
+          argo logs "$WORKFLOW_NAME" -n argo
 
       - name: Check Load test result
         if: always()
