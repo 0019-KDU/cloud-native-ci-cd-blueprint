@@ -47,20 +47,20 @@ jobs:
         run: |
           echo "🔍 Validating image tag: ${{ inputs.image_tag }}"
 
-          # Check if this tag was deployed to staging
-          STAGING_TAG=$(grep "newTag:" infra/k8s/overlays/staging/kustomization.yaml | sed 's/.*newTag:\s*//; s/"//g; s/[[:space:]]//g')
-
-          if [ "$STAGING_TAG" != "${{ inputs.image_tag }}" ]; then
+          # Check if this tag was deployed to staging (check all images)
+          if grep -q "newTag.*${{ inputs.image_tag }}" infra/k8s/overlays/staging/kustomization.yaml; then
+            echo "✅ Tag ${{ inputs.image_tag }} was tested in staging"
+          else
             echo "❌ ERROR: Tag ${{ inputs.image_tag }} has NOT been tested in staging"
-            echo "   Staging currently has: $STAGING_TAG"
+            echo ""
+            echo "   Staging currently has:"
+            grep "newTag:" infra/k8s/overlays/staging/kustomization.yaml | sed 's/^/     /'
             echo ""
             echo "🛑 Production deployments MUST go through staging first!"
             echo "   1. Deploy to staging using ci-staging workflow"
             echo "   2. Wait for E2E and Load tests to pass"
             echo "   3. Then deploy to production"
             exit 1
-          else
-            echo "✅ Tag ${{ inputs.image_tag }} was tested in staging"
           fi
 
       - name: Verify staging tests passed
