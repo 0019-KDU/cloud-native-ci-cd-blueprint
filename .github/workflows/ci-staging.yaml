@@ -352,11 +352,25 @@ jobs:
 
           echo "🏗️ Building manifests for preview environment..."
 
-          # Build manifests with kustomize
-          kubectl kustomize infra/k8s/overlays/staging > /tmp/preview-manifests.yaml
+          # Temporarily add namespace to kustomization for preview
+          cd infra/k8s/overlays/staging
+
+          # Create a temporary kustomization with preview namespace
+          cp kustomization.yaml kustomization.yaml.backup
+
+          # Uncomment and set the namespace
+          sed -i 's/# namespace: staging/namespace: '"$TARGET_NS"'/' kustomization.yaml
+
+          # Build manifests
+          kubectl kustomize . > /tmp/preview-manifests.yaml
+
+          # Restore original kustomization
+          mv kustomization.yaml.backup kustomization.yaml
+
+          cd -
 
           # Apply to preview namespace
-          kubectl apply -f /tmp/preview-manifests.yaml -n "$TARGET_NS"
+          kubectl apply -f /tmp/preview-manifests.yaml
 
           echo "✅ Manifests applied to $TARGET_NS"
 
