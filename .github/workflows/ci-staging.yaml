@@ -1,7 +1,6 @@
 name: CI/CD - Staging Environment
 
 on:
-  # Manual trigger with inputs
   workflow_dispatch:
     inputs:
       image_tag:
@@ -9,7 +8,7 @@ on:
         required: false
         type: string
       skip_tests:
-        description: "Skip E2E and Load tests"
+        description: "Skip all tests (emergency deploys only)"
         required: false
         type: boolean
         default: false
@@ -24,74 +23,104 @@ on:
         type: boolean
         default: true
 
+concurrency:
+  group: staging-deployment
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
   actions: write
 
 env:
+  # ===== Repo (IMPORTANT for ArgoCD) =====
+  # Must be a real git URL that ArgoCD can clone (and ArgoCD must have repo credentials configured)
+  REPO_URL: https://github.com/0019-KDU/cloud-native-ci-cd-blueprint.git
+
+  # ===== Infrastructure =====
   REGISTRY: registry.digitalocean.com
   IMAGE_NAME: ai-incident-assistant
+  CLUSTER_NAME: ai-incident-assistant
+
+  # ===== Main staging (ArgoCD app that tracks main) =====
   STAGING_NAMESPACE: staging
-  ARGO_WORKFLOWS_URL: ${{ secrets.ARGO_WORKFLOWS_URL }}
+  STAGING_URL: https://staging.example.com
+  ARGOCD_APP_NAME: ai-incident-staging
+
+  # ===== Timeouts =====
+  DEPLOYMENT_TIMEOUT: 5m
+
+  # ===== Load Test Config =====
+  LOAD_TEST_DURATION: 5m
+  LOAD_TEST_USERS: "50"
 
 jobs:
   # ============================================
-  # JOB 1: Determine Image Tag
+  # JOB 1: Validate & Prepare
   # ============================================
   prepare:
-    name: Prepare Deployment
+    name: Validate & Prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
-      image_tag: ${{ steps.get-tag.outputs.image_tag }}
-      needs_update: ${{ steps.check-diff.outputs.needs_update }}
+      image_tag: ${{ steps.resolve-tag.outputs.image_tag }}
+      short_sha: ${{ steps.resolve-tag.outputs.short_sha }}
+      needs_deployment: ${{ steps.check-state.outputs.needs_deployment }}
+      current_staging_tag: ${{ steps.check-state.outputs.current_tag }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Get image tag
-        id: get-tag
+      - name: Install yq
         run: |
-          if [ -n "${{ inputs.image_tag }}" ]; then
-            # Use provided tag
-            echo "image_tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
-            echo "📦 Using provided image tag: ${{ inputs.image_tag }}"
+          sudo snap install yq
+
+      - name: Resolve image tag
+        id: resolve-tag
+        shell: bash
+        run: |
+          if [[ -n "${{ inputs.image_tag }}" ]]; then
+            IMAGE_TAG="${{ inputs.image_tag }}"
+            echo "📦 Using provided image tag: $IMAGE_TAG"
           else
-            # Get current tag from dev environment
-            DEV_TAG=$(grep "newTag:" infra/k8s/overlays/dev/kustomization.yaml | head -1 | sed 's/.*newTag:\s*//; s/"//g; s/^[[:space:]]*//; s/[[:space:]]*$//')
-            echo "image_tag=$DEV_TAG" >> $GITHUB_OUTPUT
-            echo "📦 Using dev image tag: $DEV_TAG"
+            IMAGE_TAG="$(yq '.images[0].newTag' infra/k8s/overlays/dev/kustomization.yaml | tr -d '"')"
+            echo "📦 Using dev image tag: $IMAGE_TAG"
           fi
 
-      - name: Check if staging needs update
-        id: check-diff
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${IMAGE_TAG:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Check current staging state (from repo manifest)
+        id: check-state
+        shell: bash
         run: |
-          # Get current staging tag
-          STAGING_TAG=$(grep "newTag:" infra/k8s/overlays/staging/kustomization.yaml | head -1 | sed 's/.*newTag:\s*//; s/"//g; s/^[[:space:]]*//; s/[[:space:]]*$//')
-          TARGET_TAG="${{ steps.get-tag.outputs.image_tag }}"
+          CURRENT_TAG="$(yq '.images[0].newTag' infra/k8s/overlays/staging/kustomization.yaml | tr -d '"')"
+          TARGET_TAG="${{ steps.resolve-tag.outputs.image_tag }}"
 
-          echo "Current staging tag: $STAGING_TAG"
-          echo "Target tag: $TARGET_TAG"
+          echo "current_tag=$CURRENT_TAG" >> "$GITHUB_OUTPUT"
 
-          if [ "$STAGING_TAG" = "$TARGET_TAG" ]; then
-            echo "needs_update=false" >> $GITHUB_OUTPUT
-            echo "✅ Staging is already at $TARGET_TAG - will run tests only"
+          if [[ "$CURRENT_TAG" == "$TARGET_TAG" ]]; then
+            echo "needs_deployment=false" >> "$GITHUB_OUTPUT"
+            echo "✅ Staging already at $TARGET_TAG - tests only"
           else
-            echo "needs_update=true" >> $GITHUB_OUTPUT
-            echo "🔄 Staging needs update from $STAGING_TAG to $TARGET_TAG - will deploy + test"
+            echo "needs_deployment=true" >> "$GITHUB_OUTPUT"
+            echo "🔄 Staging update: $CURRENT_TAG → $TARGET_TAG"
           fi
 
   # ============================================
-  # JOB 2: Deploy to Staging (Merge and Sync)
+  # JOB 2: Create Deployment PR (complies with repo rules)
   # ============================================
-  deploy-to-staging:
-    name: Deploy to Staging
+  create-pr:
+    name: Create Deployment PR
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [prepare]
-    if: needs.prepare.outputs.needs_update == 'true'
+    if: needs.prepare.outputs.needs_deployment == 'true'
     outputs:
-      deployed: ${{ steps.deployment.outputs.deployed }}
+      pr_number: ${{ steps.create-pr.outputs.pr_number }}
+      pr_url: ${{ steps.create-pr.outputs.pr_url }}
+      branch_name: ${{ steps.branch.outputs.name }}
 
     steps:
       - name: Checkout code
@@ -100,84 +129,185 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      - name: Install tools (yq + kubectl)
+        run: |
+          sudo snap install yq --classic
+          sudo snap install kubectl --classic
+
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Update staging kustomization
+      - name: Create feature branch
+        id: branch
+        shell: bash
         run: |
-          cd infra/k8s/overlays/staging
-          sed -i "s|newTag:.*|newTag: \"${{ needs.prepare.outputs.image_tag }}\"|g" kustomization.yaml
+          BRANCH="deploy/staging-${{ needs.prepare.outputs.image_tag }}-$(date +%s)"
+          git checkout -b "$BRANCH"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
 
-          echo "📝 Updated staging kustomization.yaml:"
-          cat kustomization.yaml
+      - name: Update staging manifests (PR change)
+        shell: bash
+        run: |
+          yq -i '.images[0].newTag = "${{ needs.prepare.outputs.image_tag }}"' infra/k8s/overlays/staging/kustomization.yaml
+          echo "📝 Updated staging manifests:"
+          yq '.images' infra/k8s/overlays/staging/kustomization.yaml
 
-      - name: Commit and push directly to main
+      - name: Validate manifests
+        shell: bash
+        run: |
+          kubectl kustomize infra/k8s/overlays/staging > /dev/null
+          echo "✅ Manifests are valid"
+
+      - name: Commit and push branch
+        shell: bash
         run: |
           git add infra/k8s/overlays/staging/kustomization.yaml
-          git commit -m "🚀 Deploy to staging: ${{ needs.prepare.outputs.image_tag }}"
-          git push origin main
+          git commit -m "chore(staging): deploy ${{ needs.prepare.outputs.image_tag }}"
+          git push origin "${{ steps.branch.outputs.name }}"
 
-          echo "✅ Pushed changes directly to main"
+      - name: Create Pull Request
+        id: create-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          PR_URL="$(gh pr create \
+            --title "chore(staging): deploy ${{ needs.prepare.outputs.short_sha }}" \
+            --body "Automated staging deploy PR - Image: ${{ needs.prepare.outputs.image_tag }} - Previous: ${{ needs.prepare.outputs.current_staging_tag }} - By: ${{ github.actor }} - Do not merge manually, workflow will merge after approval." \
+            --base main \
+            --head "${{ steps.branch.outputs.name }}")"
+
+          PR_NUMBER="$(gh pr view --json number -q '.number')"
+
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "✅ Created PR #$PR_NUMBER: $PR_URL"
+
+  # ============================================
+  # JOB 3: Deploy Preview via ArgoCD (isolated namespace so it won't fight main)
+  # ============================================
+  deploy-preview:
+    name: Deploy Preview Environment (ArgoCD)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [prepare, create-pr]
+    if: needs.create-pr.result == 'success'
+    outputs:
+      preview_url: ${{ steps.deploy.outputs.preview_url }}
+      app_name: ${{ steps.deploy.outputs.app_name }}
+      preview_ns: ${{ steps.deploy.outputs.preview_ns }}
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-pr.outputs.branch_name }}
 
       - name: Install doctl
         run: |
           sudo snap install doctl
           sudo snap connect doctl:kube-config
+
+      - name: Setup Kubernetes
+        run: |
           mkdir -p $HOME/.kube
           doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          doctl kubernetes cluster kubeconfig save ${{ env.CLUSTER_NAME }}
+          echo "✅ Kubernetes configured"
 
-      - name: Save kubeconfig
-        run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
-
-      - name: Trigger ArgoCD Sync
+      - name: Deploy ArgoCD Preview Application
+        id: deploy
+        shell: bash
         run: |
-          echo "🔄 Triggering ArgoCD sync for staging..."
-          kubectl patch application ai-incident-staging -n argocd \
-            --type merge \
-            -p '{"operation": {"initiatedBy": {"username": "github-actions"}, "sync": {"revision": "HEAD"}}}' \
-            || echo "⚠️ ArgoCD sync triggered"
+          SHORT="${{ needs.prepare.outputs.short_sha }}"
+          PREVIEW_APP="staging-preview-$SHORT"
+          PREVIEW_NS="staging-preview-$SHORT"
 
-      - name: Wait for ArgoCD sync
+          # IMPORTANT:
+          # - repoURL MUST be a cloneable git URL (env.REPO_URL)
+          # - targetRevision uses the PR branch name
+          # - destination namespace is UNIQUE per preview (so it doesn't fight the main staging app)
+          cat <<EOF | kubectl apply -f -
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: $PREVIEW_APP
+            namespace: argocd
+            labels:
+              preview: "true"
+            finalizers:
+              - resources-finalizer.argocd.argoproj.io
+          spec:
+            project: default
+            source:
+              repoURL: ${{ env.REPO_URL }}
+              targetRevision: ${{ needs.create-pr.outputs.branch_name }}
+              path: infra/k8s/overlays/staging
+            destination:
+              server: https://kubernetes.default.svc
+              namespace: $PREVIEW_NS
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+              syncOptions:
+                - CreateNamespace=true
+                - PruneLast=true
+          EOF
+
+          echo "app_name=$PREVIEW_APP" >> "$GITHUB_OUTPUT"
+          echo "preview_ns=$PREVIEW_NS" >> "$GITHUB_OUTPUT"
+
+          # Your routing MUST point to this preview namespace.
+          # If you don't have per-namespace routing, set this to whatever URL hits the preview.
+          echo "preview_url=${{ env.STAGING_URL }}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for ArgoCD sync + health (poll)
+        shell: bash
         run: |
-          echo "⏳ Waiting for ArgoCD to sync..."
-          for i in {1..30}; do
-            SYNC_STATUS=$(kubectl get app ai-incident-staging -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
-            HEALTH_STATUS=$(kubectl get app ai-incident-staging -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
-            
-            echo "Attempt $i/30 - Sync: $SYNC_STATUS, Health: $HEALTH_STATUS"
-            
-            if [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ]; then
-              echo "✅ ArgoCD sync complete and healthy!"
-              break
+          APP="${{ steps.deploy.outputs.app_name }}"
+
+          echo "⏳ Waiting for sync/health on $APP..."
+          for i in {1..60}; do
+            SYNC="$(kubectl get app "$APP" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+            HEALTH="$(kubectl get app "$APP" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
+            echo "[$i/60] Sync=$SYNC Health=$HEALTH"
+            if [[ "$SYNC" == "Synced" && "$HEALTH" == "Healthy" ]]; then
+              echo "✅ Preview deployment healthy!"
+              exit 0
             fi
-            
-            sleep 10
+            sleep 5
           done
 
-      - name: Wait for deployment rollout
-        id: deployment
+          echo "❌ Preview app did not become healthy in time"
+          kubectl get app "$APP" -n argocd -o yaml || true
+          exit 1
+
+      - name: Verify rollouts in preview namespace
+        shell: bash
         run: |
-          echo "⏳ Waiting for staging deployment to complete..."
-          kubectl rollout status deployment/backend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
-          kubectl rollout status deployment/frontend -n ${{ env.STAGING_NAMESPACE }} --timeout=5m
+          NS="${{ steps.deploy.outputs.preview_ns }}"
+          kubectl rollout status deployment/backend -n "$NS" --timeout=${{ env.DEPLOYMENT_TIMEOUT }}
+          kubectl rollout status deployment/frontend -n "$NS" --timeout=${{ env.DEPLOYMENT_TIMEOUT }}
 
-          echo "✅ Staging deployment complete!"
-          echo "deployed=true" >> $GITHUB_OUTPUT
-
-          echo ""
-          echo "🌐 Staging URL: http://staging.174.138.120.13.nip.io"
-          echo "📦 Image Tag: ${{ needs.prepare.outputs.image_tag }}"
+      - name: Update PR with preview status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh pr comment "${{ needs.create-pr.outputs.pr_number }}" --body "Preview Deployed - App: ${{ steps.deploy.outputs.app_name }} - Namespace: ${{ steps.deploy.outputs.preview_ns }} - URL: ${{ steps.deploy.outputs.preview_url }} - Running tests..."
 
   # ============================================
-  # JOB 3: Run E2E Tests AFTER Deployment
+  # JOB 4: E2E Tests (target preview)
   # ============================================
   e2e-tests:
-    name: E2E Tests (Argo Workflow)
+    name: E2E Tests
     runs-on: ubuntu-latest
-    needs: [prepare, deploy-to-staging]
-    if: ${{ inputs.run_e2e_test != false && needs.deploy-to-staging.outputs.deployed == 'true' }}
+    timeout-minutes: 30
+    needs: [prepare, create-pr, deploy-preview]
+    if: inputs.skip_tests != true && inputs.run_e2e_test != false && needs.deploy-preview.result == 'success'
 
     steps:
       - name: Checkout code
@@ -187,59 +317,63 @@ jobs:
         run: |
           sudo snap install doctl
           sudo snap connect doctl:kube-config
+
+      - name: Setup Kubernetes
+        run: |
           mkdir -p $HOME/.kube
           doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-      - name: Save kubeconfig
-        run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
+          doctl kubernetes cluster kubeconfig save ${{ env.CLUSTER_NAME }}
+          echo "✅ Kubernetes configured"
 
       - name: Install Argo CLI
         run: |
-          curl -sLO https://github.com/argoproj/argo-workflows/releases/download/v3.5.4/argo-linux-amd64.gz
+          echo "📦 Installing Argo CLI v3.5.4..."
+          curl -sLO "https://github.com/argoproj/argo-workflows/releases/download/v3.5.4/argo-linux-amd64.gz"
           gunzip argo-linux-amd64.gz
           chmod +x argo-linux-amd64
           sudo mv argo-linux-amd64 /usr/local/bin/argo
+          argo version
+          echo "✅ Argo CLI ready"
 
-      - name: Submit E2E Test Workflow
-        id: submit-e2e
+      - name: Run E2E workflow (Argo Workflows)
+        id: e2e
+        shell: bash
         run: |
-          WORKFLOW_NAME=$(argo submit infra/argo-workflows/e2e-tests.yaml \
+          WORKFLOW_NAME="$(argo submit infra/argo-workflows/e2e-tests.yaml \
             -n argo \
             --parameter image_tag=${{ needs.prepare.outputs.image_tag }} \
-            --parameter staging_url=http://staging.174.138.120.13.nip.io \
-            -o name)
+            --parameter target_url=${{ needs.deploy-preview.outputs.preview_url }} \
+            --parameter namespace=${{ needs.deploy-preview.outputs.preview_ns }} \
+            --wait \
+            --log \
+            -o name)"
 
-          echo "workflow_name=$WORKFLOW_NAME" >> $GITHUB_OUTPUT
-          echo "🧪 Submitted E2E workflow: $WORKFLOW_NAME"
+          echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Wait for E2E Tests
-        run: |
-          echo "⏳ Waiting for E2E tests to complete..."
-          argo wait ${{ steps.submit-e2e.outputs.workflow_name }} -n argo
-
-      - name: Get E2E Results
+      - name: Check E2E result
         if: always()
+        shell: bash
         run: |
-          argo get ${{ steps.submit-e2e.outputs.workflow_name }} -n argo
-
-          # Check status
-          STATUS=$(argo get ${{ steps.submit-e2e.outputs.workflow_name }} -n argo -o json | jq -r '.status.phase')
-          if [ "$STATUS" != "Succeeded" ]; then
-            echo "❌ E2E tests failed!"
-            argo logs ${{ steps.submit-e2e.outputs.workflow_name }} -n argo
+          STATUS="$(argo get "${{ steps.e2e.outputs.workflow_name }}" -n argo -o json | jq -r '.status.phase')"
+          if [[ "$STATUS" != "Succeeded" ]]; then
+            echo "❌ E2E failed"
             exit 1
           fi
-
-          echo "✅ E2E tests passed!"
+          echo "✅ E2E passed"
 
   # ============================================
-  # JOB 4: Run Load Tests AFTER E2E Tests
+  # JOB 5: Load Tests (target preview)
   # ============================================
   load-tests:
-    name: Load Tests (Argo Workflow)
+    name: Load Tests
     runs-on: ubuntu-latest
-    needs: [prepare, deploy-to-staging, e2e-tests]
-    if: ${{ inputs.run_load_test != false && needs.e2e-tests.result == 'success' && needs.deploy-to-staging.outputs.deployed == 'true' }}
+    timeout-minutes: 40
+    needs: [prepare, create-pr, deploy-preview, e2e-tests]
+    if: |
+      inputs.skip_tests != true &&
+      inputs.run_load_test != false &&
+      needs.deploy-preview.result == 'success' &&
+      (needs.e2e-tests.result == 'success' || needs.e2e-tests.result == 'skipped')
 
     steps:
       - name: Checkout code
@@ -249,157 +383,180 @@ jobs:
         run: |
           sudo snap install doctl
           sudo snap connect doctl:kube-config
+
+      - name: Setup Kubernetes
+        run: |
           mkdir -p $HOME/.kube
           doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-      - name: Save kubeconfig
-        run: doctl kubernetes cluster kubeconfig save ai-incident-assistant
+          doctl kubernetes cluster kubeconfig save ${{ env.CLUSTER_NAME }}
+          echo "✅ Kubernetes configured"
 
       - name: Install Argo CLI
         run: |
-          curl -sLO https://github.com/argoproj/argo-workflows/releases/download/v3.5.4/argo-linux-amd64.gz
+          echo "📦 Installing Argo CLI v3.5.4..."
+          curl -sLO "https://github.com/argoproj/argo-workflows/releases/download/v3.5.4/argo-linux-amd64.gz"
           gunzip argo-linux-amd64.gz
           chmod +x argo-linux-amd64
           sudo mv argo-linux-amd64 /usr/local/bin/argo
+          argo version
+          echo "✅ Argo CLI ready"
 
-      - name: Submit Load Test Workflow
-        id: submit-load
+      - name: Run Load workflow (Argo Workflows)
+        id: load
+        shell: bash
         run: |
-          WORKFLOW_NAME=$(argo submit infra/argo-workflows/load-tests.yaml \
+          WORKFLOW_NAME="$(argo submit infra/argo-workflows/load-tests.yaml \
             -n argo \
             --parameter image_tag=${{ needs.prepare.outputs.image_tag }} \
-            --parameter staging_url=http://staging.174.138.120.13.nip.io \
-            --parameter duration=5m \
-            --parameter users=50 \
-            -o name)
+            --parameter target_url=${{ needs.deploy-preview.outputs.preview_url }} \
+            --parameter namespace=${{ needs.deploy-preview.outputs.preview_ns }} \
+            --parameter duration=${{ env.LOAD_TEST_DURATION }} \
+            --parameter users=${{ env.LOAD_TEST_USERS }} \
+            --wait \
+            --log \
+            -o name)"
 
-          echo "workflow_name=$WORKFLOW_NAME" >> $GITHUB_OUTPUT
-          echo "📊 Submitted Load Test workflow: $WORKFLOW_NAME"
+          echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Wait for Load Tests
-        run: |
-          echo "⏳ Waiting for load tests to complete..."
-          argo wait ${{ steps.submit-load.outputs.workflow_name }} -n argo
-
-      - name: Get Load Test Results
+      - name: Check Load result
         if: always()
+        shell: bash
         run: |
-          argo get ${{ steps.submit-load.outputs.workflow_name }} -n argo
-
-          STATUS=$(argo get ${{ steps.submit-load.outputs.workflow_name }} -n argo -o json | jq -r '.status.phase')
-          if [ "$STATUS" != "Succeeded" ]; then
-            echo "❌ Load tests failed!"
-            argo logs ${{ steps.submit-load.outputs.workflow_name }} -n argo
+          STATUS="$(argo get "${{ steps.load.outputs.workflow_name }}" -n argo -o json | jq -r '.status.phase')"
+          if [[ "$STATUS" != "Succeeded" ]]; then
+            echo "❌ Load tests failed"
             exit 1
           fi
-
-          echo "✅ Load tests passed!"
+          echo "✅ Load tests passed"
 
   # ============================================
-  # JOB 5: Notify Results
+  # JOB 6: Approval Gate & Merge + Sync main staging app
+  # ============================================
+  approve-and-merge:
+    name: Approve & Merge + Sync Main Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [prepare, create-pr, deploy-preview, e2e-tests, load-tests]
+    if: |
+      needs.create-pr.result == 'success' &&
+      (needs.e2e-tests.result == 'success' || needs.e2e-tests.result == 'skipped') &&
+      (needs.load-tests.result == 'success' || needs.load-tests.result == 'skipped')
+    environment:
+      name: staging
+      url: ${{ needs.deploy-preview.outputs.preview_url }}
+
+    steps:
+      - name: Install doctl
+        run: |
+          sudo snap install doctl
+          sudo snap connect doctl:kube-config
+
+      - name: Setup Kubernetes
+        run: |
+          mkdir -p $HOME/.kube
+          doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          doctl kubernetes cluster kubeconfig save ${{ env.CLUSTER_NAME }}
+          echo "✅ Kubernetes configured"
+
+      - name: Merge PR (after approval)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          PR="${{ needs.create-pr.outputs.pr_number }}"
+          echo "✅ Approved - merging PR #$PR"
+          gh pr merge "$PR" --squash --delete-branch
+
+      - name: Sync main staging ArgoCD app (tracking main)
+        shell: bash
+        run: |
+          APP="${{ env.ARGOCD_APP_NAME }}"
+          echo "🔄 Forcing refresh + waiting for main staging sync..."
+
+          kubectl patch application "$APP" -n argocd --type merge \
+            -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}' || true
+
+          for i in {1..60}; do
+            SYNC="$(kubectl get app "$APP" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+            HEALTH="$(kubectl get app "$APP" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
+            echo "[$i/60] Sync=$SYNC Health=$HEALTH"
+            if [[ "$SYNC" == "Synced" && "$HEALTH" == "Healthy" ]]; then
+              echo "✅ Main staging app synced & healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "❌ Main staging app did not become healthy in time"
+          kubectl get app "$APP" -n argocd -o yaml || true
+          exit 1
+
+      - name: Cleanup preview app + namespace
+        if: always()
+        shell: bash
+        run: |
+          PREVIEW_APP="${{ needs.deploy-preview.outputs.app_name }}"
+          PREVIEW_NS="${{ needs.deploy-preview.outputs.preview_ns }}"
+
+          kubectl delete application "$PREVIEW_APP" -n argocd --wait=false || true
+          kubectl delete namespace "$PREVIEW_NS" --wait=false || true
+
+  # ============================================
+  # JOB 7: Notify
   # ============================================
   notify:
-    name: Notify Results
+    name: Notify
     runs-on: ubuntu-latest
-    needs: [prepare, deploy-to-staging, e2e-tests, load-tests]
+    timeout-minutes: 10
+    needs:
+      [
+        prepare,
+        create-pr,
+        deploy-preview,
+        e2e-tests,
+        load-tests,
+        approve-and-merge,
+      ]
     if: always()
 
     steps:
-      - name: Send Slack - Success
-        if: ${{ needs.deploy-to-staging.outputs.deployed == 'true' && needs.e2e-tests.result == 'success' && (needs.load-tests.result == 'success' || needs.load-tests.result == 'skipped') }}
-        uses: slackapi/slack-github-action@v1.26.0
-        with:
-          payload: |
-            {
-              "text": "✅ Staging deployment successful!",
-              "blocks": [
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "✅ Staging Deployment & Tests Complete"
-                  }
-                },
-                {
-                  "type": "section",
-                  "fields": [
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Image Tag:*\n`${{ needs.prepare.outputs.image_tag }}`"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Triggered by:*\n${{ github.actor }}"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Deployment:*\n✅ Successful"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*E2E Tests:*\n${{ needs.e2e-tests.result == 'success' && '✅ Passed' || '⏭️ Skipped' }}"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Load Tests:*\n${{ needs.load-tests.result == 'success' && '✅ Passed' || '⏭️ Skipped' }}"
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "🎭 <http://staging.174.138.120.13.nip.io|View Staging Environment>\n\n*Ready for production deployment!*"
-                  }
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+      - name: Compose status
+        id: s
+        shell: bash
+        run: |
+          if [[ "${{ needs.approve-and-merge.result }}" == "success" ]]; then
+            echo "emoji=✅" >> "$GITHUB_OUTPUT"
+            echo "msg=Staging deployment merged & synced" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ needs.create-pr.result }}" == "skipped" ]]; then
+            echo "emoji=ℹ️" >> "$GITHUB_OUTPUT"
+            echo "msg=No deployment needed (manifest already at target tag)" >> "$GITHUB_OUTPUT"
+          else
+            echo "emoji=❌" >> "$GITHUB_OUTPUT"
+            echo "msg=Staging pipeline failed" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Send Slack - Failure
-        if: ${{ needs.deploy-to-staging.result == 'failure' || needs.e2e-tests.result == 'failure' || needs.load-tests.result == 'failure' }}
+      - name: Send Slack
         uses: slackapi/slack-github-action@v1.26.0
         with:
           payload: |
             {
-              "text": "❌ Staging deployment failed!",
+              "text": "${{ steps.s.outputs.emoji }} Staging: ${{ steps.s.outputs.msg }}",
               "blocks": [
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "❌ Staging Deployment or Tests Failed"
-                  }
-                },
+                { "type": "header", "text": { "type": "plain_text", "text": "${{ steps.s.outputs.emoji }} Staging Pipeline" } },
                 {
                   "type": "section",
                   "fields": [
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Image Tag:*\n`${{ needs.prepare.outputs.image_tag }}`"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Deployment:*\n${{ needs.deploy-to-staging.result }}"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*E2E Tests:*\n${{ needs.e2e-tests.result }}"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Load Tests:*\n${{ needs.load-tests.result }}"
-                    }
+                    { "type": "mrkdwn", "text": "*Message:*\n${{ steps.s.outputs.msg }}" },
+                    { "type": "mrkdwn", "text": "*Image Tag:*\n`${{ needs.prepare.outputs.image_tag }}`" },
+                    { "type": "mrkdwn", "text": "*PR:*\n${{ needs.create-pr.outputs.pr_url || 'N/A' }}" },
+                    { "type": "mrkdwn", "text": "*Run:*\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" }
                   ]
                 },
                 {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔗 View Failed Run>"
-                  }
+                  "type": "context",
+                  "elements": [
+                    { "type": "mrkdwn", "text": "E2E: ${{ needs.e2e-tests.result }} | Load: ${{ needs.load-tests.result }} | Merge: ${{ needs.approve-and-merge.result }}" }
+                  ]
                 }
               ]
             }
