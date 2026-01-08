@@ -312,15 +312,16 @@ jobs:
           SHORT="${{ needs.prepare.outputs.short_sha }}"
           PREVIEW_APP="staging-preview-$SHORT"
           PREVIEW_NS="staging-preview-$SHORT"
+          PREVIEW_URL="http://preview-$SHORT.174.138.120.13.nip.io"
 
           echo "app_name=$PREVIEW_APP" >> "$GITHUB_OUTPUT"
           echo "preview_ns=$PREVIEW_NS" >> "$GITHUB_OUTPUT"
-          echo "preview_url=${{ env.STAGING_URL }}" >> "$GITHUB_OUTPUT"
+          echo "preview_url=$PREVIEW_URL" >> "$GITHUB_OUTPUT"
 
           echo "📋 Preview Environment:"
           echo "  App Name:  $PREVIEW_APP"
           echo "  Namespace: $PREVIEW_NS"
-          echo "  URL:       ${{ env.STAGING_URL }}"
+          echo "  URL:       $PREVIEW_URL"
 
       - name: Create preview namespace
         shell: bash
@@ -382,6 +383,18 @@ jobs:
 
           # Build manifests
           kubectl kustomize . > /tmp/preview-manifests.yaml
+
+          # Modify the ingress hostname for preview environment
+          # Change staging.174.138.120.13.nip.io to preview-SHORTSHA.174.138.120.13.nip.io
+          SHORT_SHA="${{ needs.prepare.outputs.short_sha }}"
+          PREVIEW_HOST="preview-$SHORT_SHA.174.138.120.13.nip.io"
+
+          echo "Updating ingress hostname to: $PREVIEW_HOST"
+          sed -i "s/staging\.174\.138\.120\.13\.nip\.io/$PREVIEW_HOST/g" /tmp/preview-manifests.yaml
+
+          # Verify the ingress change
+          echo "Ingress configuration:"
+          grep -A2 "host:" /tmp/preview-manifests.yaml | head -5
 
           # Restore original kustomization
           mv kustomization.yaml.backup kustomization.yaml
@@ -519,6 +532,7 @@ jobs:
         run: |
           STATUS="${{ job.status }}"
           NS="${{ steps.info.outputs.preview_ns }}"
+          PREVIEW_URL="${{ steps.info.outputs.preview_url }}"
 
           if [[ "$STATUS" == "success" ]]; then
             EMOJI="✅"
@@ -532,7 +546,7 @@ jobs:
           ### $EMOJI Preview Deployment $STATUS
 
           **Namespace:** \`$NS\`
-          **URL:** ${{ env.STAGING_URL }}
+          **URL:** $PREVIEW_URL
 
           #### Resources
           \`\`\`
