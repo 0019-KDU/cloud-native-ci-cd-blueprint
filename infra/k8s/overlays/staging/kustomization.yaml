@@ -2,7 +2,6 @@
 # AI Incident Assistant - Staging configuration with moderate resources
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 # Base reference
 resources:
 - ../../base
@@ -14,108 +13,102 @@ namespace: staging
 # Common labels for staging environment
 commonLabels:
   environment: staging
-
 # Replica counts for staging (moderate HA)
 replicas:
-- count: 2
-  name: backend
-- count: 2
-  name: frontend
-
+  - count: 2
+    name: backend
+  - count: 2
+    name: frontend
 # Resource patches for staging environment (moderate limits)
-
-
 
 # Ingress host patch for staging
 patches:
-- patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/requests/cpu
-      value: "75m"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/requests/memory
-      value: "96Mi"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/limits/cpu
-      value: "350m"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/limits/memory
-      value: "384Mi"
-  target:
-    kind: Deployment
-    name: backend
-- patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/requests/cpu
-      value: "40m"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/requests/memory
-      value: "48Mi"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/limits/cpu
-      value: "150m"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/limits/memory
-      value: "192Mi"
-  target:
-    kind: Deployment
-    name: frontend
-- patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/requests/cpu
-      value: "75m"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/requests/memory
-      value: "192Mi"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/limits/cpu
-      value: "375m"
-    - op: replace
-      path: /spec/template/spec/containers/0/resources/limits/memory
-      value: "768Mi"
-  target:
-    kind: StatefulSet
-    name: postgres
-- patch: |-
-    - op: replace
-      path: /spec/rules/0
-      value:
-        host: staging.174.138.120.13.nip.io
-        http:
-          paths:
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: backend
-                port:
-                  number: 3001
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: frontend
-                port:
-                  number: 80
-  target:
-    kind: Ingress
-    name: ai-incident-assistant
-
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "75m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "96Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "350m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "384Mi"
+    target:
+      kind: Deployment
+      name: backend
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "40m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "48Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "150m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "192Mi"
+    target:
+      kind: Deployment
+      name: frontend
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "75m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "192Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "375m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "768Mi"
+    target:
+      kind: StatefulSet
+      name: postgres
+  - patch: |-
+      - op: replace
+        path: /spec/rules/0
+        value:
+          host: staging.174.138.120.13.nip.io
+          http:
+            paths:
+            - path: /api
+              pathType: Prefix
+              backend:
+                service:
+                  name: backend
+                  port:
+                    number: 3001
+            - path: /
+              pathType: Prefix
+              backend:
+                service:
+                  name: frontend
+                  port:
+                    number: 80
+    target:
+      kind: Ingress
+      name: ai-incident-assistant
 # ConfigMap for staging-specific configuration
 configMapGenerator:
-- behavior: merge
-  literals:
-  - NODE_ENV=staging
-  - LOG_LEVEL=info
-  - CORS_ORIGIN=*
-  - VITE_API_URL=
-  name: backend-config
-
+  - behavior: merge
+    literals:
+      - NODE_ENV=staging
+      - LOG_LEVEL=info
+      - CORS_ORIGIN=*
+      - VITE_API_URL=
+    name: backend-config
 # Image tags (will be updated by CI/CD pipeline)
 images:
-- name: registry.digitalocean.com/ai-incident-assistant/backend
-  newName: registry.digitalocean.com/ai-incident-assistant/backend
-  newTag: b387808985929fb1fa92b32ed2c3a212a7884789
-- name: registry.digitalocean.com/ai-incident-assistant/frontend
-  newName: registry.digitalocean.com/ai-incident-assistant/frontend
-  newTag: b387808985929fb1fa92b32ed2c3a212a7884789
+  - name: registry.digitalocean.com/ai-incident-assistant/backend
+    newName: registry.digitalocean.com/ai-incident-assistant/backend
+    newTag: "e4ed7aa3571f9fe99114c5dd897c9b3b1927f630"
+  - name: registry.digitalocean.com/ai-incident-assistant/frontend
+    newName: registry.digitalocean.com/ai-incident-assistant/frontend
+    newTag: "88975757c1dd3a5e318ecd5817ea64ec82a92b74"
