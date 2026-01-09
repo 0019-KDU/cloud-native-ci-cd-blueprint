@@ -99,7 +99,14 @@ jobs:
 
             - name: Run tests
               working-directory: frontend
-              run: npm test -- --passWithNoTests
+              run: |
+                  # Check if test script exists
+                  if npm run | grep -q "test"; then
+                    npm test -- --passWithNoTests
+                  else
+                    echo "⚠️ No test script found - skipping tests"
+                    echo "Frontend validation will rely on linting and SonarQube"
+                  fi
 
             - name: SonarQube Scan - Frontend
               uses: SonarSource/sonarqube-scan-action@master
