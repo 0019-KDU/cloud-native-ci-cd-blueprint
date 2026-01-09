@@ -2,77 +2,81 @@ name: GitOps PR Checks
 
 # This workflow provides required status checks for GitOps PRs
 # (PRs that only change kustomization files)
+# Job names MUST match pr-validation.yaml to satisfy branch protection
 
 on:
-    pull_request:
-        branches:
-            - main
-        paths:
-            - "infra/k8s/overlays/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "infra/k8s/overlays/**"
 
 jobs:
-    # These jobs satisfy the required status checks
-    # when only kustomization files change
+  # These jobs satisfy the required status checks
+  # when only kustomization files change
+  # Job names match pr-validation.yaml
 
-    build-scan-backend:
-        name: Build & Scan Backend
-        runs-on: ubuntu-latest
-        steps:
-            - name: Skip - GitOps PR
-              run: |
-                  echo "✅ Skipping build - this is a GitOps PR"
-                  echo "Only kustomization files changed"
-                  echo ""
-                  echo "This job satisfies the required status check"
+  backend-test:
+    name: Backend Tests & SonarQube
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip - GitOps PR
+        run: |
+          echo "✅ Skipping tests - this is a GitOps PR"
+          echo "Only kustomization files changed"
+          echo ""
+          echo "This job satisfies the 'Backend Tests & SonarQube' required check"
 
-    build-scan-frontend:
-        name: Build & Scan Frontend
-        runs-on: ubuntu-latest
-        steps:
-            - name: Skip - GitOps PR
-              run: |
-                  echo "✅ Skipping build - this is a GitOps PR"
-                  echo "Only kustomization files changed"
-                  echo ""
-                  echo "This job satisfies the required status check"
+  frontend-test:
+    name: Frontend Tests & SonarQube
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip - GitOps PR
+        run: |
+          echo "✅ Skipping tests - this is a GitOps PR"
+          echo "Only kustomization files changed"
+          echo ""
+          echo "This job satisfies the 'Frontend Tests & SonarQube' required check"
 
-    validate-kustomization:
-        name: Validate Kustomization
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+  validate-kustomization:
+    name: Validate Kustomization
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Install kustomize
-              run: |
-                  curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-                  sudo mv kustomize /usr/local/bin/
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
 
-            - name: Validate dev kustomization
-              run: |
-                  if [ -f "infra/k8s/overlays/dev/kustomization.yaml" ]; then
-                    echo "🔍 Validating dev kustomization..."
-                    kustomize build infra/k8s/overlays/dev > /dev/null
-                    echo "✅ Dev kustomization is valid"
-                  fi
+      - name: Validate dev kustomization
+        run: |
+          if [ -f "infra/k8s/overlays/dev/kustomization.yaml" ]; then
+            echo "🔍 Validating dev kustomization..."
+            kustomize build infra/k8s/overlays/dev > /dev/null
+            echo "✅ Dev kustomization is valid"
+          fi
 
-            - name: Validate staging kustomization
-              run: |
-                  if [ -f "infra/k8s/overlays/staging/kustomization.yaml" ]; then
-                    echo "🔍 Validating staging kustomization..."
-                    kustomize build infra/k8s/overlays/staging > /dev/null
-                    echo "✅ Staging kustomization is valid"
-                  fi
+      - name: Validate staging kustomization
+        run: |
+          if [ -f "infra/k8s/overlays/staging/kustomization.yaml" ]; then
+            echo "🔍 Validating staging kustomization..."
+            kustomize build infra/k8s/overlays/staging > /dev/null
+            echo "✅ Staging kustomization is valid"
+          fi
 
-            - name: Validate prod kustomization
-              run: |
-                  if [ -f "infra/k8s/overlays/prod/kustomization.yaml" ]; then
-                    echo "🔍 Validating prod kustomization..."
-                    kustomize build infra/k8s/overlays/prod > /dev/null
-                    echo "✅ Prod kustomization is valid"
-                  fi
+      - name: Validate prod kustomization
+        run: |
+          if [ -f "infra/k8s/overlays/prod/kustomization.yaml" ]; then
+            echo "🔍 Validating prod kustomization..."
+            kustomize build infra/k8s/overlays/prod > /dev/null
+            echo "✅ Prod kustomization is valid"
+          fi
 
-            - name: Summary
-              run: |
-                  echo ""
-                  echo "✅ All kustomization files are valid!"
+      - name: Summary
+        run: |
+          echo ""
+          echo "✅ All kustomization files are valid!"
+          echo ""
+          echo "This GitOps PR is ready to merge"

@@ -1,29 +1,21 @@
 name: CI/CD - Dev Environment
 
+# This workflow runs ONLY on push to main
+# It builds images, pushes to registry, and creates GitOps PR to update dev
+
 on:
   push:
     branches:
       - main
-      - develop
     paths:
       - "backend/**"
       - "frontend/**"
       - "infra/docker/**"
       - ".trivyignore"
       - ".github/workflows/ci-dev.yaml"
-      # Explicitly exclude kustomization files
+      # Explicitly exclude kustomization files (those trigger separate flows)
       - "!infra/k8s/overlays/**/kustomization.yaml"
       - "!infra/k8s/base/kustomization.yaml"
-  pull_request:
-    branches:
-      - main
-      - develop
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - "infra/docker/**"
-      - "infra/k8s/**"
-      - ".github/workflows/ci-dev.yaml"
 
 permissions:
   contents: write
@@ -37,7 +29,7 @@ env:
 
 jobs:
   # ============================================
-  # JOB 1: Backend Tests & Quality Checks
+  # JOB 1: Backend Tests & SonarQube
   # ============================================
   backend-test:
     name: Backend Tests & SonarQube
@@ -176,7 +168,6 @@ jobs:
           severity: "CRITICAL"
 
       - name: Push backend image
-        if: github.event_name == 'push'
         run: |
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:latest
@@ -235,7 +226,6 @@ jobs:
           severity: "CRITICAL"
 
       - name: Push frontend image
-        if: github.event_name == 'push'
         run: |
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest
@@ -247,7 +237,6 @@ jobs:
     name: Update GitOps Manifests
     runs-on: ubuntu-latest
     needs: [build-backend, build-frontend]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     outputs:
       pr_number: ${{ steps.create-pr.outputs.pr_number }}
       pr_url: ${{ steps.create-pr.outputs.pr_url }}
