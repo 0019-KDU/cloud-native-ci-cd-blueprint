@@ -490,11 +490,11 @@ jobs:
           echo "Found old branches to delete:"
           echo "$OLD_BRANCHES"
 
-          # Keep only the last 3 deployment branches, delete older ones
-          echo "$OLD_BRANCHES" | tail -n +4 | while read branch; do
+          # Delete all old deployment branches using GitHub API
+          echo "$OLD_BRANCHES" | while read branch; do
             if [ -n "$branch" ]; then
               echo "🗑️ Deleting branch: $branch"
-              git push origin --delete "$branch" || echo "⚠️ Failed to delete $branch (may already be deleted)"
+              gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$branch" 2>&1 || echo "⚠️ Branch already deleted"
             fi
           done
 
