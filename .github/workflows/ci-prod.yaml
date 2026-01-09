@@ -333,6 +333,13 @@ jobs:
             sleep 10
           done
 
+          echo ""
+          echo "⏳ Waiting 60 seconds for application warmup..."
+          echo "   This allows backend to establish DB connections and complete initialization"
+          sleep 60
+          echo "✅ Warmup complete, starting smoke tests..."
+          echo ""
+
       - name: Run smoke tests
         run: |
           echo "🔥 Running enhanced smoke tests on preview..."
