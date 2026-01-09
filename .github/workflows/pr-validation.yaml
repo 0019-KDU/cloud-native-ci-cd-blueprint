@@ -118,7 +118,6 @@ jobs:
                   args: >
                       -Dsonar.projectKey=ai-incident-frontend
                       -Dsonar.sources=src
-                      -Dsonar.tests=src/__tests__
 
             - name: Summary
               run: |
