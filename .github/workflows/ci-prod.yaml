@@ -98,6 +98,7 @@ jobs:
     needs: [validate]
     outputs:
       pr_number: ${{ steps.create-pr.outputs.pr_number }}
+      branch_name: ${{ env.BRANCH_NAME }}
 
     steps:
       - name: Checkout code
@@ -184,7 +185,7 @@ jobs:
 
           # Merge the PR if not already merged
           echo "🔀 Merging PR..."
-          gh pr merge ${{ steps.create-pr.outputs.pr_number }} --squash --auto || {
+          gh pr merge ${{ steps.create-pr.outputs.pr_number }} --squash --auto --delete-branch || {
             echo "⚠️ Auto-merge may have already been enabled or PR is merging"
           }
           echo "✅ PR merge initiated"
@@ -201,6 +202,12 @@ jobs:
             
             if [ "$PR_STATE" = "MERGED" ]; then
               echo "✅ PR #${{ steps.create-pr.outputs.pr_number }} merged successfully!"
+              
+              # Ensure branch is deleted using GitHub API
+              sleep 3
+              BRANCH="${{ env.BRANCH_NAME }}"
+              gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$BRANCH" 2>&1 || echo "Branch already deleted"
+              
               exit 0
             elif [ "$PR_STATE" = "CLOSED" ]; then
               echo "❌ PR was closed without merging"
@@ -784,3 +791,19 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Cleanup deployment branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${{ needs.update-manifests.outputs.branch_name }}"
+
+          if [ -z "$BRANCH" ]; then
+            echo "No branch to cleanup"
+            exit 0
+          fi
+
+          echo "🧹 Deleting deployment branch: $BRANCH..."
+          gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$BRANCH" 2>&1 || echo "Branch already deleted"
+          echo "✅ Branch cleanup complete"

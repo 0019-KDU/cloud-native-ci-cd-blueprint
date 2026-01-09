@@ -805,6 +805,7 @@ jobs:
         shell: bash
         run: |
           PR="${{ needs.create-pr.outputs.pr_number }}"
+          BRANCH="${{ needs.create-pr.outputs.branch_name }}"
 
           echo "✅ Manual approval received!"
           echo "🔀 Merging PR #$PR..."
@@ -812,6 +813,10 @@ jobs:
           gh pr merge "$PR" --squash --delete-branch
 
           echo "✅ PR merged successfully"
+
+          # Ensure branch is deleted using GitHub API (backup)
+          sleep 3
+          gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$BRANCH" 2>&1 || echo "Branch already deleted"
 
       - name: Wait for main branch to update
         shell: bash
@@ -908,6 +913,20 @@ jobs:
 
           echo "✅ Cleanup initiated for $PREVIEW_NS"
 
+      - name: Delete deployment branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          BRANCH="${{ needs.create-pr.outputs.branch_name }}"
+
+          echo "🧹 Deleting deployment branch: $BRANCH..."
+
+          git push origin --delete "$BRANCH" 2>&1 || echo "Branch already deleted or doesn't exist"
+
+          echo "✅ Branch cleanup complete"
+
   # ============================================
   # JOB 7: Rollback on Failure
   # ============================================
@@ -915,7 +934,15 @@ jobs:
     name: Rollback on Failure
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [prepare, create-pr, deploy-preview, e2e-tests, load-tests, approve-and-promote]
+    needs:
+      [
+        prepare,
+        create-pr,
+        deploy-preview,
+        e2e-tests,
+        load-tests,
+        approve-and-promote,
+      ]
     if: |
       always() &&
       (needs.deploy-preview.result == 'failure' ||
@@ -986,7 +1013,16 @@ jobs:
     name: Send Notifications
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [prepare, create-pr, deploy-preview, e2e-tests, load-tests, approve-and-promote, rollback]
+    needs:
+      [
+        prepare,
+        create-pr,
+        deploy-preview,
+        e2e-tests,
+        load-tests,
+        approve-and-promote,
+        rollback,
+      ]
     if: always()
 
     steps:
