@@ -37,7 +37,7 @@ spec:
       
       containers:
       - name: backend
-        image: registry.digitalocean.com/ai-incident-assistant/backend:latest
+        image: registry.digitalocean.com/ai-incident-assistant/backend
         imagePullPolicy: Always
         
         ports:

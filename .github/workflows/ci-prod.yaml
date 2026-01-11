@@ -496,12 +496,31 @@ jobs:
             echo "⚠️ Production returned: $PROD_STATUS"
           fi
 
+          echo ""
+          echo "⏰ Waiting 120 seconds for application warmup..."
+          echo "   This allows backend to fully initialize:"
+          echo "   - Establish database connection pool"
+          echo "   - Load configuration and cache"
+          echo "   - Complete dependency injection"
+          echo "   - Warm up application routes"
+          sleep 120
+          echo "✅ Warmup complete, starting health checks..."
+
       - name: Monitor production health (5 minutes)
         run: |
           echo "📊 Monitoring production health for 5 minutes..."
           echo "   This ensures the deployment is stable before completing."
           echo ""
 
+          # First check: Pod status before monitoring
+          echo "🔍 Current pod status:"
+          kubectl get pods -n ${{ env.PROD_NAMESPACE }} -l app=backend
+          kubectl get pods -n ${{ env.PROD_NAMESPACE }} -l app=frontend
+          echo ""
+
+          # Check backend logs for errors
+          echo "🔍 Recent backend logs:"
+          kubectl logs -n ${{ env.PROD_NAMESPACE }} -l app=backend --tail=20 --prefix=true || echo "No backend logs available"
           echo "⏳ Waiting 60 seconds for application warmup..."
           sleep 60
           echo "✅ Warmup complete, starting health checks..."
@@ -528,6 +547,20 @@ jobs:
             else
               echo "   ❌ Frontend: $FRONTEND_STATUS | API: $API_STATUS"
               FAILURES=$((FAILURES + 1))
+              
+              # Debug on first failure
+              if [ $FAILURES -eq 1 ]; then
+                echo ""
+                echo "🔍 Debugging failure - Pod status:"
+                kubectl get pods -n ${{ env.PROD_NAMESPACE }} -l app=backend -o wide
+                echo ""
+                echo "🔍 Backend pod events:"
+                kubectl get events -n ${{ env.PROD_NAMESPACE }} --field-selector involvedObject.kind=Pod --sort-by='.lastTimestamp' | grep backend | tail -5
+                echo ""
+                echo "🔍 Backend logs (last 30 lines):"
+                kubectl logs -n ${{ env.PROD_NAMESPACE }} -l app=backend --tail=30 --prefix=true || echo "No logs"
+                echo ""
+              fi
               
               if [ $FAILURES -ge $MAX_FAILURES ]; then
                 echo ""
